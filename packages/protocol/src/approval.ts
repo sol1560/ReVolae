@@ -85,6 +85,8 @@ export class ApprovalVerifier {
  */
 export function verifyTerminalOpen(p: {
   sessionId: string;
+  /** 验签这一侧自己的 deviceId */
+  deviceId: string;
   signature?: ApprovalSignature;
   phoneKeys: Pick<PublicKeys, "sig" | "sigAlg">;
   seenNonce: (nonce: string) => boolean;
@@ -97,13 +99,13 @@ export function verifyTerminalOpen(p: {
   if (sig.expiresAt <= now) return { ok: false, reason: "expired", message: "签名已过期" };
   if (sig.expiresAt > now + (p.maxTtlSec ?? 300)) return { ok: false, reason: "expires_after_request", message: "签名有效期太长" };
   if (p.seenNonce(sig.nonce)) return { ok: false, reason: "nonce_reused", message: "nonce 重复（疑似重放）" };
-  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, nonce: sig.nonce, expiresAt: sig.expiresAt });
+  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, deviceId: p.deviceId, nonce: sig.nonce, expiresAt: sig.expiresAt });
   return verifySignedPayload({ payload: utf8.encode(approvalSignedPayload(challenge, true)), alg: sig.alg, sig: sig.sig, publicKey: p.phoneKeys });
 }
 
 /** 手机侧：给 terminal.open 签名 */
-export function signTerminalOpen(p: { sessionId: string; privateKey: Uint8Array; alg: SigAlg; keyId: string; nonce: string; expiresAt: number }): ApprovalSignature {
-  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, nonce: p.nonce, expiresAt: p.expiresAt });
+export function signTerminalOpen(p: { sessionId: string; deviceId: string; privateKey: Uint8Array; alg: SigAlg; keyId: string; nonce: string; expiresAt: number }): ApprovalSignature {
+  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, deviceId: p.deviceId, nonce: p.nonce, expiresAt: p.expiresAt });
   return { alg: p.alg, keyId: p.keyId, sig: signPayload(utf8.encode(approvalSignedPayload(challenge, true)), p.privateKey, p.alg), expiresAt: p.expiresAt, nonce: p.nonce };
 }
 

@@ -93,8 +93,8 @@ public func approvalSignedPayload(_ challenge: String, allow: Bool) -> String {
 }
 
 /// 与 terminalOpenChallenge() 一致：开终端的 challenge 套用审批格式
-public func terminalOpenChallenge(sessionId: String, nonce: String, expiresAt: Int) -> String {
-    approvalChallenge(runId: "terminal", stepId: sessionId, actionDetail: "terminal.open", nonce: nonce, expiresAt: expiresAt)
+public func terminalOpenChallenge(sessionId: String, deviceId: String, nonce: String, expiresAt: Int) -> String {
+    approvalChallenge(runId: "terminal", stepId: sessionId, actionDetail: "terminal.open\n" + deviceId, nonce: nonce, expiresAt: expiresAt)
 }
 
 // MARK: - 实时画面（kind=2 的 payload），与 media.ts 一致

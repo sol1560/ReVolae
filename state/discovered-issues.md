@@ -22,3 +22,8 @@
 - 控制端 UI 是本地假状态，没接 WebSocket、没发真实 pair.request；hub 现已定稿（docs/protocol.md「hub 登录与中继」），需要一轮接线。
 - 该线程替用户做的决定：Gradle 9.6 / AGP 9.4 / Kotlin 2.4.20 / compile 37 / min 29；BouncyCastle 1.81 做 HPKE；X25519 由 BC 管、P-256 由 Android Keystore 管；只给 Android 实际处理的消息建强类型，其余控制帧原样转发。
 - 需要真机：无障碍/通知使用权/录屏授权、各厂商后台保活、指纹。
+
+## 2026-09-19 F1.7 终端加固（oracle 对抗审查后）
+- 已修：terminal.open 签名原来只绑 sessionId，可跨设备重放 → 现在绑 deviceId；无 phoneKeys 时原来静默不验签 → 现在要显式 unsafeUnsigned 否则构造抛错；BunPty.close 对 `trap '' HUP` 的 shell 留孤儿 → 2 s 后 SIGKILL；streamId 重启从 1 起 → 时间种子；sendFrame 抛错会丢字节 → 关会话；sessionId 没校验 → 正则；cwd 不存在要到 spawn 才报错且已烧 nonce → 验签前检查；nonce 计数环 1000 个 → 按 expiresAt 过期、可持久化。
+- **未修（hpke.ts 层）：HPKE 握手没有接收方新鲜度。** 发送方单方面建立上下文，接收方不贡献随机数，hub 理论上可以把一整段密文流（从握手帧开始）原样重放给设备；应用层的 nonce 只保护 terminal.open 这一类签名消息，普通控制消息和 kind 1 输入帧没有这层保护。修法：接收方在 hello 里带一次性 challenge，发送方把它放进 HPKE 的 info；或者每条链路记住已见过的 enc，重复即拒。留给下一轮协议改动统一做（会改 wire 格式）。
+- 未做：nonce 表的持久化只是留了接口（Map），Bun 宿主和 Swift daemon 都还没真的落盘。

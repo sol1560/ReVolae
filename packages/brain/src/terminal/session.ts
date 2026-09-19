@@ -129,11 +129,19 @@ export class TerminalSession {
     while (this.queue.length) {
       const next = this.queue[0]!;
       if (!this.draining && this.sent - this.acked + next.length > this.o.windowBytes && this.sent > this.acked) return;
+      const bytes = encodeFrame({ kind: 1, streamId: this.streamId, payload: next });
+      try {
+        this.o.sendFrame(bytes);
+      } catch (e) {
+        // 链路发不出去：不能算成已发，也不能悄悄丢，直接关会话
+        this.o.log?.({ t: "terminal.send.failed", sessionId: this.sessionId, error: e instanceof Error ? e.message : String(e) });
+        this.close("链路发送失败，会话已关闭");
+        return;
+      }
       this.queue.shift();
       this.queuedBytes -= next.length;
       this.sent += next.length;
       this.frames++;
-      this.o.sendFrame(encodeFrame({ kind: 1, streamId: this.streamId, payload: next }));
     }
   }
 

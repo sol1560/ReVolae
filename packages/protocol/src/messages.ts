@@ -23,6 +23,7 @@ import {
   ToolDescriptor,
   Verdict,
 } from "./common.js";
+import { TERMINAL_SESSION_ID_RE } from "./frame.js";
 
 const base = { v: z.literal(1), id: z.string() };
 const msg = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
@@ -48,7 +49,7 @@ export const ApprovalDecision = msg("approval.decision", {
   signature: ApprovalSignature.optional(),
 });
 export const TerminalOpen = msg("terminal.open", {
-  sessionId: z.string(),
+  sessionId: z.string().regex(TERMINAL_SESSION_ID_RE),
   cols: z.number().int().positive(),
   rows: z.number().int().positive(),
   cwd: z.string().optional(),

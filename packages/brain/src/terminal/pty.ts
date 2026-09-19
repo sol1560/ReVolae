@@ -31,8 +31,10 @@ export class BunPty implements Pty {
   private exitCb: ((code: number | undefined) => void) | undefined;
   private readonly proc: ReturnType<typeof Bun.spawn>;
   private exited = false;
+  private readonly killAfterMs: number;
 
-  constructor(o: PtySpawnOptions) {
+  constructor(o: PtySpawnOptions & { killAfterMs?: number }) {
+    this.killAfterMs = o.killAfterMs ?? 2000;
     const shell = o.shell ?? process.env.SHELL ?? (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
     this.proc = Bun.spawn([shell, "-l"], {
       cwd: o.cwd,
@@ -66,6 +68,15 @@ export class BunPty implements Pty {
     try {
       this.proc.terminal?.close();
     } catch {}
+    // shell 忽略 SIGHUP（trap '' HUP）时不能留下孤儿进程
+    const t = setTimeout(() => {
+      if (!this.exited) {
+        try {
+          this.proc.kill("SIGKILL");
+        } catch {}
+      }
+    }, this.killAfterMs);
+    if (typeof t === "object" && "unref" in t) t.unref();
   }
   onData(cb: (chunk: Uint8Array) => void) {
     this.dataCb = cb;

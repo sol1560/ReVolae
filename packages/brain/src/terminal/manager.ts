@@ -1,4 +1,5 @@
-import { verifyTerminalOpen, type DeviceToPhone, type Frame, type MsgBody, type PhoneToDevice, type PublicKeys, type ToolDescriptor } from "@cuaremote/protocol";
+import { statSync } from "node:fs";
+import { MAX_STREAM_ID, TERMINAL_SESSION_ID_RE, verifyTerminalOpen, type DeviceToPhone, type Frame, type MsgBody, type PhoneToDevice, type PublicKeys, type ToolDescriptor } from "@cuaremote/protocol";
 import type { ToolResult } from "../host/types.js";
 import type { PtyFactory } from "./pty.js";
 import { TerminalSession, type TerminalSessionOptions } from "./session.js";
@@ -17,11 +18,20 @@ export interface TerminalManagerOptions {
   spawn: PtyFactory;
   sendFrame: (bytes: Uint8Array) => void;
   sendMsg: (body: MsgBody<DeviceToPhone>) => void;
+  /** 这台设备自己的 id：签名里绑了它，别的设备上签的 terminal.open 在这里无效 */
+  deviceId: string;
   /**
    * 开终端是 L2：需要手机用 Secure Enclave 签过名（verifyTerminalOpen）。
-   * 不给 phoneKeys = 不验签（M0 网页 PoC / 同机调试），生产 daemon 必须给。
+   * 生产 daemon 必须给 phoneKeys；M0 网页 PoC / 同机调试要显式写 unsafeUnsigned: true，两个都不给构造时直接抛错（不能静默放行）。
    */
   phoneKeys?: Pick<PublicKeys, "sig" | "sigAlg">;
+  unsafeUnsigned?: boolean;
+  /**
+   * 已用过的 nonce → expiresAt。传进来可以让宿主持久化（重启后旧签名 300 秒内仍不能重放）；不传就只在内存里记。
+   */
+  nonces?: Map<string, number>;
+  /** 第一个 streamId。默认按进程启动时间取一个大数，重启后不会和上一轮的 streamId 撞上 */
+  firstStreamId?: number;
   /** 同时最多几个会话，默认 8 */
   maxSessions?: number;
   /** 传给每个会话的窗口 / 分块参数 */
@@ -43,11 +53,16 @@ export interface TerminalManagerOptions {
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
   private readonly byStream = new Map<number, TerminalSession>();
-  private readonly nonces = new Set<string>();
-  private readonly nonceOrder: string[] = [];
-  private nextStream = 1;
+  private readonly nonces: Map<string, number>;
+  private nextStream: number;
 
-  constructor(private readonly o: TerminalManagerOptions) {}
+  constructor(private readonly o: TerminalManagerOptions) {
+    if (!o.phoneKeys && !o.unsafeUnsigned) throw new Error("TerminalManager 需要 phoneKeys（生产）或显式 unsafeUnsigned: true（调试）");
+    this.nonces = o.nonces ?? new Map();
+    // 高 28 位放秒级时间戳、低 4 位从 1 起：重启后种子一定比上一轮大（2^28 秒 ≈ 8.5 年才绕一圈），最大 0xfffffff1 仍在 u32 内
+    const nowSec = o.now?.() ?? Math.floor(Date.now() / 1000);
+    this.nextStream = o.firstStreamId ?? ((nowSec % 0x1000_0000) * 16 + 1);
+  }
 
   get size() {
     return this.sessions.size;
@@ -96,10 +111,15 @@ export class TerminalManager {
     const t0 = Date.now();
     const s = this.sessions.get(String(args.sessionId ?? ""));
     if (!s) return { ok: false, attachments: [], error: `没有会话 ${String(args.sessionId)}`, ms: Date.now() - t0 };
-    const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5) || 5));
+    const raw = Number(args.limit);
+    const limit = Number.isFinite(raw) ? Math.max(1, Math.min(20, Math.floor(raw))) : 5;
     return { ok: true, attachments: [], output: JSON.stringify({ blocks: s.blocks(limit) }), ms: Date.now() - t0 };
   }
 
+  /**
+   * 关掉全部会话。拥有链路的那层在端到端链路重新握手 / 断开时必须调它：
+   * 新链路上不能让旧 streamId 的帧（可能是中继方重放的）写进还活着的 shell。
+   */
   closeAll() {
     for (const s of [...this.sessions.values()]) {
       s.close();
@@ -109,23 +129,30 @@ export class TerminalManager {
 
   private open(m: Extract<PhoneToDevice, { type: "terminal.open" }>) {
     const fail = (code: string, message: string) => this.o.sendMsg({ type: "error", code, message, ref: m.sessionId });
+    // 便宜的检查放在验签前面：这些失败不该烧掉一次 Face ID 签名
+    if (!TERMINAL_SESSION_ID_RE.test(m.sessionId)) return fail("terminal_bad_session_id", "sessionId 只能是 1–64 个字母、数字、_ 或 -");
     if (this.sessions.has(m.sessionId)) return fail("terminal_exists", `会话 ${m.sessionId} 已经开着`);
     if (this.sessions.size >= (this.o.maxSessions ?? 8)) return fail("terminal_limit", "同时打开的终端太多了");
+    const cwd = m.cwd ?? this.o.defaultCwd;
+    if (cwd !== undefined && !isDirectory(cwd)) return fail("terminal_bad_cwd", `目录不存在：${cwd}`);
     if (this.o.phoneKeys) {
-      const r = verifyTerminalOpen({ sessionId: m.sessionId, signature: m.signature, phoneKeys: this.o.phoneKeys, seenNonce: (n) => this.nonces.has(n), now: this.o.now?.() });
+      const now = this.o.now?.() ?? Math.floor(Date.now() / 1000);
+      this.pruneNonces(now);
+      const r = verifyTerminalOpen({ sessionId: m.sessionId, deviceId: this.o.deviceId, signature: m.signature, phoneKeys: this.o.phoneKeys, seenNonce: (n) => this.nonces.has(n), now });
       if (!r.ok) {
         this.o.log?.({ t: "terminal.open.rejected", sessionId: m.sessionId, reason: r.reason });
         return fail("approval_invalid", r.message);
       }
-      this.rememberNonce(m.signature!.nonce);
+      this.nonces.set(m.signature!.nonce, m.signature!.expiresAt);
     }
     let pty;
     try {
-      pty = this.o.spawn({ cols: m.cols, rows: m.rows, cwd: m.cwd ?? this.o.defaultCwd, shell: this.o.shell, env: { CUAREMOTE_SESSION: m.sessionId } });
+      pty = this.o.spawn({ cols: m.cols, rows: m.rows, cwd, shell: this.o.shell, env: { CUAREMOTE_SESSION: m.sessionId } });
     } catch (e) {
       return fail("terminal_spawn_failed", e instanceof Error ? e.message : String(e));
     }
     const streamId = this.nextStream++;
+    if (this.nextStream > MAX_STREAM_ID) this.nextStream = 1;
     const s = new TerminalSession({
       sessionId: m.sessionId,
       streamId,
@@ -148,9 +175,16 @@ export class TerminalManager {
     if (this.byStream.get(s.streamId) === s) this.byStream.delete(s.streamId);
   }
 
-  private rememberNonce(n: string) {
-    this.nonces.add(n);
-    this.nonceOrder.push(n);
-    if (this.nonceOrder.length > 1000) this.nonces.delete(this.nonceOrder.shift()!);
+  /** 过期的 nonce 不可能再验过（expiresAt ≤ now 会先被拒），可以忘掉 */
+  private pruneNonces(now: number) {
+    for (const [n, exp] of this.nonces) if (exp <= now) this.nonces.delete(n);
+  }
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
   }
 }

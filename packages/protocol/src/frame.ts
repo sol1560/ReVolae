@@ -112,9 +112,13 @@ export function approvalChallenge(p: {
  * 开终端（L2）的 challenge：没有 run/step，手机自己选 nonce 和 expiresAt，设备按同样规则重建后验签。
  * 签名内容仍是 approvalSignedPayload(challenge, true)，手机端和审批共用一套 Face ID 签名流程。
  */
-export function terminalOpenChallenge(p: { sessionId: string; nonce: string; expiresAt: number }): string {
-  return approvalChallenge({ runId: "terminal", stepId: p.sessionId, actionDetail: "terminal.open", nonce: p.nonce, expiresAt: p.expiresAt });
+export function terminalOpenChallenge(p: { sessionId: string; deviceId: string; nonce: string; expiresAt: number }): string {
+  // deviceId 进 actionDetail：同一个签名不能拿到另一台配过对的设备上开终端
+  return approvalChallenge({ runId: "terminal", stepId: p.sessionId, actionDetail: `terminal.open\n${p.deviceId}`, nonce: p.nonce, expiresAt: p.expiresAt });
 }
+
+/** terminal.open.sessionId 的合法形式：短、只含 URL 安全字符（会进环境变量、日志和每条 terminal.block） */
+export const TERMINAL_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function approvalSignedPayload(challenge: string, allow: boolean): string {
   return `${challenge}\n${allow ? "allow" : "deny"}`;

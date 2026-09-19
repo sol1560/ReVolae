@@ -203,16 +203,18 @@ Android 被控有两条路：装 `apps/android-daemon`（无障碍 + MediaProjec
 
 手机 ↔ 设备之间的一个真 PTY 会话。控制消息走 Frame(kind 0)，PTY 字节走 Frame(kind 1)，两个方向共用同一个 `streamId`。参考实现 `packages/brain/src/terminal/{pty,session,manager}.ts`（Bun 版宿主用 `Bun.spawn({terminal})`，Swift daemon 用 `forkpty` 照同样规则实现）。
 
-打开（手机 → 设备）：`terminal.open{sessionId, cols, rows, cwd?, signature?}`。开终端等于给对方一个 shell，按 L2 处理：生产 daemon 必须验签，`signature` 是 `signTerminalOpen(...)` 签出来的 `ApprovalSignature`，签名内容 = `approvalSignedPayload(terminalOpenChallenge({sessionId, nonce, expiresAt}), true)`，也就是把 `runId="terminal"`、`stepId=sessionId`、`actionDetail="terminal.open"` 套进普通审批的 challenge 格式，手机端可以复用 Face ID 审批的那把 Secure Enclave 密钥和同一段签名代码。设备侧 `verifyTerminalOpen`：没签名、已过期、有效期超过 300 秒、nonce 用过（记最近 1000 个）、签名对不上（含签的是别的 sessionId）都拒，回 `error{code:"approval_invalid", ref: sessionId}`。M0 网页 PoC / 同机调试可以不配手机公钥，那时不验签。
+打开（手机 → 设备）：`terminal.open{sessionId, cols, rows, cwd?, signature?}`。`sessionId` 只能是 1–64 个 `[A-Za-z0-9_-]`（`TERMINAL_SESSION_ID_RE`，它会进环境变量和日志）。开终端等于给对方一个 shell，按 L2 处理：生产 daemon 必须验签，`signature` 是 `signTerminalOpen(...)` 签出来的 `ApprovalSignature`，签名内容 = `approvalSignedPayload(terminalOpenChallenge({sessionId, deviceId, nonce, expiresAt}), true)`，也就是把 `runId="terminal"`、`stepId=sessionId`、`actionDetail="terminal.open\n" + deviceId` 套进普通审批的 challenge 格式，手机端可以复用 Face ID 审批的那把 Secure Enclave 密钥和同一段签名代码。**签名绑定 deviceId**：给 Mac A 签的 `terminal.open` 拿到 Mac B 上（同一部手机配对的另一台）无效，hub 或中间人不能把一次授权挪到别的设备。
 
-其他拒绝码：`terminal_exists`（sessionId 已在用）、`terminal_limit`（同时最多 8 个）、`terminal_spawn_failed`。
+设备侧检查顺序（`TerminalManager.open`）：先做不烧签名的便宜检查——`sessionId` 不合法 → `terminal_bad_session_id`，已在用 → `terminal_exists`，超过并发上限（默认 8）→ `terminal_limit`，`cwd`（或默认目录）不是已存在的目录 → `terminal_bad_cwd`；这些失败**不记 nonce**，同一份签名修正参数后仍能用。然后 `verifyTerminalOpen`：没签名、已过期、有效期超过 300 秒、nonce 用过、签名对不上（含签的是别的 sessionId / 别的 deviceId）都拒，回 `error{code:"approval_invalid", ref: sessionId}`。nonce 按 `expiresAt` 保留、过期即清；宿主应把这张表持久化（`TerminalManager({nonces})` 接一个 Map），这样 daemon 重启后 300 秒内旧签名照样不能重放。最后 `spawn` 失败 → `terminal_spawn_failed`。
 
-成功后设备回 `terminal.opened{sessionId, streamId, pid?}`。`streamId` 由**设备**分配（会话内递增、关掉的不复用），手机此后用它发 kind 1 帧。子进程是用户的登录 shell（`$SHELL -l`），环境里加 `TERM=xterm-256color`、`COLORTERM=truecolor`、`CUAREMOTE_SESSION=<sessionId>`（shell 集成脚本靠它决定是否发 OSC 133）。
+不验签只允许显式打开：`TerminalManager({unsafeUnsigned: true})`，给 M0 网页 PoC / 同机调试用；既没 `phoneKeys` 也没这个开关时构造直接抛错，不存在「忘了配公钥就默默放行」。
+
+成功后设备回 `terminal.opened{sessionId, streamId, pid?}`。`streamId` 由**设备**分配、只增不减、关掉的不复用；起点按启动时刻取种子（`(秒级时间戳 mod 2^28) × 16 + 1`，u32 内），daemon 重启后不会和上一轮的 streamId 撞上。端到端链路重新握手或断开时设备必须 `closeAll()`：新链路上不能让旧 streamId 的帧（可能是中继方重放的）写进还活着的 shell。手机此后用 streamId 发 kind 1 帧。子进程是用户的登录 shell（`$SHELL -l`），环境里加 `TERM=xterm-256color`、`COLORTERM=truecolor`、`CUAREMOTE_SESSION=<sessionId>`（shell 集成脚本靠它决定是否发 OSC 133）。
 
 字节流：
-- 设备 → 手机：PTY 输出按 ≤ 16 KiB 切成 kind 1 帧。窗口式背压：设备记累计发出 `sent`，手机用 `terminal.ack{sessionId, bytes}` 报**累计**收到字节数；`sent - acked` 达到 256 KiB 后设备停发、先攒着；`bytes ≤ 已确认` 或 `bytes > sent` 的 ack 忽略。攒到 8 MiB 还没人确认就认为对端死了：关 PTY，发 `terminal.exit` + `error{code:"terminal_closed"}`（宁可断也不悄悄丢字节）。手机端建议每收 32–64 KiB 或 100 ms 发一次 ack。
+- 设备 → 手机：PTY 输出按 ≤ 16 KiB 切成 kind 1 帧。往链路写帧失败（socket 已关等）时不算已发、也不悄悄丢，直接关会话（`terminal_closed`）。窗口式背压：设备记累计发出 `sent`，手机用 `terminal.ack{sessionId, bytes}` 报**累计**收到字节数；`sent - acked` 达到 256 KiB 后设备停发、先攒着；`bytes ≤ 已确认` 或 `bytes > sent` 的 ack 忽略。攒到 8 MiB 还没人确认就认为对端死了：关 PTY，发 `terminal.exit` + `error{code:"terminal_closed"}`（宁可断也不悄悄丢字节）。手机端建议每收 32–64 KiB 或 100 ms 发一次 ack。
 - 手机 → 设备：kind 1 帧原样写进 PTY，没有背压（键盘输入量很小）。
-- `terminal.resize{sessionId, cols, rows}` → `TIOCSWINSZ`；`terminal.close{sessionId}` → 关 PTY（SIGHUP）。
+- `terminal.resize{sessionId, cols, rows}` → `TIOCSWINSZ`；`terminal.close{sessionId}` → 关 PTY（SIGHUP；2 秒内没退出（比如 shell 里 `trap '' HUP`）补 SIGKILL，不留孤儿进程）。
 
 结束：子进程退出时设备**不等 ack**把剩余输出全部发完，再发 `terminal.exit{sessionId, code?}`（被信号杀掉时没有 `code`）。手机主动 close 也会收到 `terminal.exit`（无 code）。`terminal.exit` 之后同一 `streamId` 的帧两边都丢弃。
 

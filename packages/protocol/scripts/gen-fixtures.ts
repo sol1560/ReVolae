@@ -27,7 +27,7 @@ writeFileSync(join(swiftDir, "binary.json"), JSON.stringify({
   frameHex: Buffer.from(frame).toString("hex"),
   relayHex: Buffer.from(relay).toString("hex"),
   challenge: approvalChallenge({ runId: "r1", stepId: "s1", actionDetail: "rm -rf ~/x", nonce: "n0", expiresAt: 1700000000 }),
-  terminalOpenChallenge: terminalOpenChallenge({ sessionId: "sess-1", nonce: "n1", expiresAt: 1700000300 }),
+  terminalOpenChallenge: terminalOpenChallenge({ sessionId: "sess-1", deviceId: "mac-1", nonce: "n1", expiresAt: 1700000300 }),
   mediaFrameHex: Buffer.from(encodeMediaFrame({ keyframe: true, hasParameterSets: true, pts: 0x01020304, width: 1440, height: 900, data: new Uint8Array([0, 0, 0, 1, 0x67, 0xaa]) })).toString("hex"),
 }, null, 2));
 
