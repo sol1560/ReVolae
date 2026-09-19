@@ -199,6 +199,25 @@ Android 被控有两条路：装 `apps/android-daemon`（无障碍 + MediaProjec
 
 历史同步的端侧逻辑（参考实现 `packages/brain/src/sync/history-sync.ts`，Swift / Kotlin 照抄）：只传已结束的 run（有 `finishedAt`），本地 `finishedAt` 变新才重传；谁手里有明文谁传——本地大脑的 run 由设备传，云端大脑的 run 由手机传；拉取按游标增量、解不开的块跳过计数、合并时 `finishedAt` 大的赢、拉回来的不再回传；关掉开关 → `sync.delete` 整类 + 清空「已上传」记录。持久化 `{uploaded: runId→finishedAt, cursor}`。
 
+## 远程终端
+
+手机 ↔ 设备之间的一个真 PTY 会话。控制消息走 Frame(kind 0)，PTY 字节走 Frame(kind 1)，两个方向共用同一个 `streamId`。参考实现 `packages/brain/src/terminal/{pty,session,manager}.ts`（Bun 版宿主用 `Bun.spawn({terminal})`，Swift daemon 用 `forkpty` 照同样规则实现）。
+
+打开（手机 → 设备）：`terminal.open{sessionId, cols, rows, cwd?, signature?}`。开终端等于给对方一个 shell，按 L2 处理：生产 daemon 必须验签，`signature` 是 `signTerminalOpen(...)` 签出来的 `ApprovalSignature`，签名内容 = `approvalSignedPayload(terminalOpenChallenge({sessionId, nonce, expiresAt}), true)`，也就是把 `runId="terminal"`、`stepId=sessionId`、`actionDetail="terminal.open"` 套进普通审批的 challenge 格式，手机端可以复用 Face ID 审批的那把 Secure Enclave 密钥和同一段签名代码。设备侧 `verifyTerminalOpen`：没签名、已过期、有效期超过 300 秒、nonce 用过（记最近 1000 个）、签名对不上（含签的是别的 sessionId）都拒，回 `error{code:"approval_invalid", ref: sessionId}`。M0 网页 PoC / 同机调试可以不配手机公钥，那时不验签。
+
+其他拒绝码：`terminal_exists`（sessionId 已在用）、`terminal_limit`（同时最多 8 个）、`terminal_spawn_failed`。
+
+成功后设备回 `terminal.opened{sessionId, streamId, pid?}`。`streamId` 由**设备**分配（会话内递增、关掉的不复用），手机此后用它发 kind 1 帧。子进程是用户的登录 shell（`$SHELL -l`），环境里加 `TERM=xterm-256color`、`COLORTERM=truecolor`、`CUAREMOTE_SESSION=<sessionId>`（shell 集成脚本靠它决定是否发 OSC 133）。
+
+字节流：
+- 设备 → 手机：PTY 输出按 ≤ 16 KiB 切成 kind 1 帧。窗口式背压：设备记累计发出 `sent`，手机用 `terminal.ack{sessionId, bytes}` 报**累计**收到字节数；`sent - acked` 达到 256 KiB 后设备停发、先攒着；`bytes ≤ 已确认` 或 `bytes > sent` 的 ack 忽略。攒到 8 MiB 还没人确认就认为对端死了：关 PTY，发 `terminal.exit` + `error{code:"terminal_closed"}`（宁可断也不悄悄丢字节）。手机端建议每收 32–64 KiB 或 100 ms 发一次 ack。
+- 手机 → 设备：kind 1 帧原样写进 PTY，没有背压（键盘输入量很小）。
+- `terminal.resize{sessionId, cols, rows}` → `TIOCSWINSZ`；`terminal.close{sessionId}` → 关 PTY（SIGHUP）。
+
+结束：子进程退出时设备**不等 ack**把剩余输出全部发完，再发 `terminal.exit{sessionId, code?}`（被信号杀掉时没有 `code`）。手机主动 close 也会收到 `terminal.exit`（无 code）。`terminal.exit` 之后同一 `streamId` 的帧两边都丢弃。
+
+大脑：`terminal.blocks` 工具（见下一节）由 `TerminalManager.callBlocks` 提供，`LocalBunHost({terminals})` 只在给了管理器时把它放进工具表。网页 PoC（`apps/poc-web`）目前不含终端页，终端只在 iOS app 里做。
+
 ## 终端命令块
 
 终端会话（`terminal.open` / `terminal.data`）里的字节流原本是一整条，手机端只能当成一个滚动屏幕看。命令块把它按「一条命令 = 一块」切开：手机上可以按块折叠、复制、分享，终端模式问大脑「刚才为什么报错」时大脑也能直接看到最近几条命令和输出，而不是整屏字符。

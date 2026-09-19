@@ -1613,11 +1613,13 @@ public struct TerminalOpened: Codable, Sendable {
     public var id: String
     public var type: String = "terminal.opened"
     public var sessionId: String
+    public var streamId: Int
     public var pid: Int?
 
-    public init(id: String, sessionId: String, pid: Int? = nil) {
+    public init(id: String, sessionId: String, streamId: Int, pid: Int? = nil) {
         self.id = id
         self.sessionId = sessionId
+        self.streamId = streamId
         self.pid = pid
     }
 
@@ -1626,6 +1628,7 @@ public struct TerminalOpened: Codable, Sendable {
         case id
         case `type`
         case sessionId
+        case streamId
         case pid
     }
 }

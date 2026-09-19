@@ -144,7 +144,8 @@ export const TerminalSuggestion = msg("terminal.suggestion", {
   explanation: z.string(),
   level: Level,
 });
-export const TerminalOpened = msg("terminal.opened", { sessionId: z.string(), pid: z.number().int().optional() });
+/** streamId：这条会话的 PTY 字节走 Frame(kind=1) 时用的流号，由设备分配，两个方向共用 */
+export const TerminalOpened = msg("terminal.opened", { sessionId: z.string(), streamId: z.number().int().nonnegative(), pid: z.number().int().optional() });
 export const TerminalExit = msg("terminal.exit", { sessionId: z.string(), code: z.number().int().optional() });
 /** 命令块状态变化（prompt → running → done），daemon 解析 OSC 133 后发；每次变化发整块 */
 export const TerminalBlockMsg = msg("terminal.block", { block: TerminalBlock });

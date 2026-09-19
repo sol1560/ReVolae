@@ -14,7 +14,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import type { ApprovalSignature, PublicKeys } from "./common.js";
 
 export type SigAlg = PublicKeys["sigAlg"];
-import { approvalSignedPayload } from "./frame.js";
+import { approvalSignedPayload, terminalOpenChallenge } from "./frame.js";
 
 const utf8 = new TextEncoder();
 
@@ -77,6 +77,34 @@ export class ApprovalVerifier {
     this.pending.delete(`${decision.runId}/${decision.stepId}`);
     return { ok: true };
   }
+}
+
+/**
+ * 验 terminal.open 的签名：expiresAt 必须在 (now, now+maxTtlSec]，nonce 不能用过（seen 由调用方保管），签名对 terminalOpenChallenge 成立。
+ * 通过后调用方要把 nonce 记进 seen。
+ */
+export function verifyTerminalOpen(p: {
+  sessionId: string;
+  signature?: ApprovalSignature;
+  phoneKeys: Pick<PublicKeys, "sig" | "sigAlg">;
+  seenNonce: (nonce: string) => boolean;
+  now?: number;
+  maxTtlSec?: number;
+}): ApprovalVerifyResult {
+  const sig = p.signature;
+  if (!sig) return { ok: false, reason: "bad_signature", message: "开终端需要签名确认" };
+  const now = p.now ?? Math.floor(Date.now() / 1000);
+  if (sig.expiresAt <= now) return { ok: false, reason: "expired", message: "签名已过期" };
+  if (sig.expiresAt > now + (p.maxTtlSec ?? 300)) return { ok: false, reason: "expires_after_request", message: "签名有效期太长" };
+  if (p.seenNonce(sig.nonce)) return { ok: false, reason: "nonce_reused", message: "nonce 重复（疑似重放）" };
+  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, nonce: sig.nonce, expiresAt: sig.expiresAt });
+  return verifySignedPayload({ payload: utf8.encode(approvalSignedPayload(challenge, true)), alg: sig.alg, sig: sig.sig, publicKey: p.phoneKeys });
+}
+
+/** 手机侧：给 terminal.open 签名 */
+export function signTerminalOpen(p: { sessionId: string; privateKey: Uint8Array; alg: SigAlg; keyId: string; nonce: string; expiresAt: number }): ApprovalSignature {
+  const challenge = terminalOpenChallenge({ sessionId: p.sessionId, nonce: p.nonce, expiresAt: p.expiresAt });
+  return { alg: p.alg, keyId: p.keyId, sig: signPayload(utf8.encode(approvalSignedPayload(challenge, true)), p.privateKey, p.alg), expiresAt: p.expiresAt, nonce: p.nonce };
 }
 
 /** 无状态：只验签名本身（规则 3） */

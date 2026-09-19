@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import type { Scope, ToolDescriptor } from "@cuaremote/protocol";
 import type { Host, ToolResult } from "./types.js";
+import { TERMINAL_BLOCKS_DESCRIPTOR, type TerminalManager } from "../terminal/manager.js";
 
 const isMac = process.platform === "darwin";
 /** 单引号包起来给 sh 用 */
@@ -72,6 +73,8 @@ export interface LocalHostOptions {
   shell?: string;
   /** 用登录 shell（-l）跑命令，拿到用户的 PATH；测试里关掉 */
   loginShell?: boolean;
+  /** 有远程终端会话时挂上，工具表多一个 terminal.blocks */
+  terminals?: TerminalManager;
 }
 
 /** M0：大脑和被控设备是同一台机器时的宿主 */
@@ -79,9 +82,11 @@ export class LocalBunHost implements Host {
   readonly scope: Scope;
   private readonly shell: string;
   private readonly loginShell: boolean;
+  private readonly terminals?: TerminalManager;
 
   constructor(opts: LocalHostOptions = {}) {
     this.loginShell = opts.loginShell ?? true;
+    this.terminals = opts.terminals;
     this.scope = {
       allowedDirs: opts.scope?.allowedDirs ?? [homedir()],
       allowedApps: opts.scope?.allowedApps ?? [],
@@ -92,7 +97,7 @@ export class LocalBunHost implements Host {
 
   async listTools() {
     const base = isMac ? LOCAL_TOOLS : LOCAL_TOOLS.filter((t) => !["applescript.run", "jxa.run", "shortcuts.run", "shortcuts.list"].includes(t.name));
-    const tools = this.adb() ? [...base, ADB_TOOL] : base;
+    const tools = [...base, ...(this.adb() ? [ADB_TOOL] : []), ...(this.terminals ? [TERMINAL_BLOCKS_DESCRIPTOR] : [])];
     return { tools, scope: this.scope };
   }
 
@@ -141,6 +146,10 @@ export class LocalBunHost implements Host {
           if (!r.ok) return done(r);
           const data = await readFile(file);
           return done({ ok: true, output: `截图 ${data.length} 字节`, attachments: [{ kind: "image/jpeg", inline: data.toString("base64") }] });
+        }
+        case "terminal.blocks": {
+          if (!this.terminals) return done({ ok: false, error: "这台机器没有远程终端会话" });
+          return done(await this.terminals.callBlocks(args));
         }
         case "android.adb": {
           const adb = this.adb();

@@ -22,7 +22,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F1.4 daemon-macos（runner A）[PENDING]
 - F1.5 ios（runner B）[PENDING]
 - F1.6 学习应用（brain 侧）[DONE] packages/brain/src/learn/{learn,cards}.ts：四阶段 app.inventory → propose_cards → 校验（占位符/控件/来源/fromItem/等级只升）→ app.cards；runCard 走策略引擎且卡片等级为下限；转义 applescript/jxa/shell；host-mode 与云端大脑均接入（云端需 deviceId）；20 测试。daemon 侧 app.inventory/app.card.get 归 F1.4（runner）
-- F1.7 终端 [PENDING]
+- F1.7 终端 [DONE-orb 部分] 协议：terminal.open 带 signature（signTerminalOpen/verifyTerminalOpen，复用审批 challenge 格式：runId=terminal/stepId=sessionId/actionDetail=terminal.open，TTL≤300 s、nonce 记 1000）、terminal.opened 加 streamId（设备分配）；brain：packages/brain/src/terminal/{pty,session,manager}.ts —— BunPty（Bun.spawn terminal 真 PTY）、TerminalSession（16 KiB 分帧、256 KiB 窗口背压、迟到/超 sent ack 忽略、8 MiB 未确认断开并发 terminal_closed、退出时不等 ack 冲完再 terminal.exit、喂 Osc133Parser 发 terminal.block）、TerminalManager（open/resize/ack/close 路由、kind 1 帧按 streamId 写 PTY、terminal_exists/terminal_limit/terminal_spawn_failed/approval_invalid、CUAREMOTE_SESSION 环境变量、terminal.blocks 工具）；LocalBunHost({terminals}) 挂 terminal.blocks；21 测试（含 Linux 真 PTY：exit code、resize 后 stty size、close 触发 onExit）；docs「远程终端」节；schema/Swift 已重生成。Swift daemon forkpty + iOS 终端页（SwiftTerm）+ SSH 客户端归 runner；网页 PoC 不含终端
 - F1.8 开源材料 [PENDING]
 
 ## M2 - iPad + 终端进阶 [RUNNING]
