@@ -218,6 +218,16 @@ Android 被控有两条路：装 `apps/android-daemon`（无障碍 + MediaProjec
 
 大脑：`terminal.blocks` 工具（见下一节）由 `TerminalManager.callBlocks` 提供，`LocalBunHost({terminals})` 只在给了管理器时把它放进工具表。网页 PoC（`apps/poc-web`）目前不含终端页，终端只在 iOS app 里做。
 
+## 实时画面与局域网直连
+
+手机 → 设备 `media.subscribe{fps ≤ 30, maxWidth, codec: jpeg|h264}`；设备回 `media.info{streamId, width, height, codec, fps}`（`streamId` 由设备分配、退订后不复用），之后按 fps 发 Frame(kind 2, streamId)；`media.unsubscribe{}` 停。一个对端同时只有一条订阅，再订阅就是换参数（重新回 `media.info`）。
+
+kind 2 的 payload（`packages/protocol/src/media.ts` / `Frame.swift` 的 `MediaFrame`）：`[u8 flags][u32 pts 毫秒 BE][u16 width BE][u16 height BE][data]`。`flags` bit0 关键帧（JPEG 永远置 1），bit1 表示 H.264 的 `data` 前面带了 Annex-B 的 SPS/PPS（IDR 前必带，手机拿它建解码器；分辨率变了也要重发）。`pts` 是设备单调时钟毫秒，u32 回绕，手机只用它丢旧帧（`mediaFrameIsNewer` / `MediaFrame.isNewer`），没收到关键帧之前的非关键帧全丢。H.264 一帧一个 access unit，Annex-B 起始码；Mac 侧 SCStream → VideoToolbox（实时档、无 B 帧、关键帧间隔 ≤ 2 s），iOS 侧 `AVSampleBufferDisplayLayer`。JPEG 是低带宽 / 兼容路径，Android 被控端目前只出 JPEG。
+
+画面不走大脑也不写日志，`dataLeavesDevice` 按订阅方在哪算：走 hub 中继时是密文，hub 看不到内容。
+
+**局域网直连（Bonjour）**：设备广播 `_cuaremote._tcp`，TXT `id=<deviceId> v=1 n=<名字>`（`lanTxtRecord` / `LanDiscovery.txtRecord`）。手机发现后只连版本对得上且已配对的设备（`lanAdvertUsable`），直接开设备上的 WebSocket。链路上跑的还是 `RelayEnvelope` + HPKE，信封 `to/from` 和密钥都不变，只是对面从 hub 换成设备本身，所以实现是同一套收发代码换个 URL。用途：hub 掉线或没网时照常控制；实时画面和终端优先走直连省中继带宽；有 hub 时控制消息两条路都能走，谁先连上用谁，掉了再回另一条。直连不需要再配对，也不放宽任何权限。
+
 ## 终端命令块
 
 终端会话（`terminal.open` / `terminal.data`）里的字节流原本是一整条，手机端只能当成一个滚动屏幕看。命令块把它按「一条命令 = 一块」切开：手机上可以按块折叠、复制、分享，终端模式问大脑「刚才为什么报错」时大脑也能直接看到最近几条命令和输出，而不是整屏字符。

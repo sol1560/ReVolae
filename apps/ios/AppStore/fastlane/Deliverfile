@@ -1,0 +1,8 @@
+app_identifier("dev.cuaremote.app")
+copyright("#{Time.now.year} sol1560")
+primary_category("PRODUCTIVITY")
+secondary_category("DEVELOPER_TOOLS")
+# 以下两个 URL 上线前必须换成真实地址
+privacy_url("zh-Hans" => "https://github.com/sol1560/ReVolae/blob/main/docs/security.md", "en-US" => "https://github.com/sol1560/ReVolae/blob/main/docs/security.md")
+support_url("zh-Hans" => "https://github.com/sol1560/ReVolae/issues", "en-US" => "https://github.com/sol1560/ReVolae/issues")
+app_rating_config_path("./rating.json")

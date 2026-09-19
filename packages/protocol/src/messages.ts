@@ -149,7 +149,9 @@ export const TerminalOpened = msg("terminal.opened", { sessionId: z.string(), st
 export const TerminalExit = msg("terminal.exit", { sessionId: z.string(), code: z.number().int().optional() });
 /** 命令块状态变化（prompt → running → done），daemon 解析 OSC 133 后发；每次变化发整块 */
 export const TerminalBlockMsg = msg("terminal.block", { block: TerminalBlock });
+/** 订阅成功：设备分配 streamId，之后 kind=2 帧都用它（payload 格式见 media.ts） */
 export const MediaInfo = msg("media.info", {
+  streamId: z.number().int().nonnegative(),
   width: z.number().int(),
   height: z.number().int(),
   codec: z.enum(["jpeg", "h264"]),

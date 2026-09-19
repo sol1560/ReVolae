@@ -1686,13 +1686,15 @@ public struct MediaInfo: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "media.info"
+    public var streamId: Int
     public var width: Int
     public var height: Int
     public var codec: MediaInfoCodec
     public var fps: Double
 
-    public init(id: String, width: Int, height: Int, codec: MediaInfoCodec, fps: Double) {
+    public init(id: String, streamId: Int, width: Int, height: Int, codec: MediaInfoCodec, fps: Double) {
         self.id = id
+        self.streamId = streamId
         self.width = width
         self.height = height
         self.codec = codec
@@ -1703,6 +1705,7 @@ public struct MediaInfo: Codable, Sendable {
         case v
         case id
         case `type`
+        case streamId
         case width
         case height
         case codec

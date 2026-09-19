@@ -1,0 +1,47 @@
+# 用法（在 apps/ios 下）：
+#   fastlane ios screenshots   # 跑 UI 测试出各尺寸截图（需要 CuaRemoteUITests 里的 snapshot() 调用）
+#   fastlane ios beta          # 打包上 TestFlight
+#   fastlane ios release       # 上传元数据 + 截图 + 二进制到 App Store Connect（不自动提审）
+# 签名：用 App Store Connect API key（ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH），证书由 Xcode 自动管理或 match。
+default_platform(:ios)
+
+PROJECT = "CuaRemote.xcodeproj"
+SCHEME = "CuaRemote"
+
+platform :ios do
+  before_all do
+    if ENV["ASC_KEY_ID"]
+      app_store_connect_api_key(key_id: ENV["ASC_KEY_ID"], issuer_id: ENV["ASC_ISSUER_ID"], key_filepath: ENV["ASC_KEY_PATH"])
+    end
+  end
+
+  desc "各机型截图（模拟器）"
+  lane :screenshots do
+    capture_screenshots(project: PROJECT, scheme: "CuaRemoteUITests")
+    frame_screenshots(white: false) if ENV["FRAME_SCREENSHOTS"]
+  end
+
+  desc "TestFlight"
+  lane :beta do
+    increment_build_number(build_number: ENV["BUILD_NUMBER"] || Time.now.strftime("%Y%m%d%H%M"), xcodeproj: PROJECT)
+    build_app(project: PROJECT, scheme: SCHEME, export_method: "app-store", xcargs: "-allowProvisioningUpdates")
+    upload_to_testflight(skip_waiting_for_build_processing: true, changelog: File.read("metadata/zh-Hans/release_notes.txt"))
+  end
+
+  desc "上传到 App Store Connect（不提审）"
+  lane :release do
+    build_app(project: PROJECT, scheme: SCHEME, export_method: "app-store", xcargs: "-allowProvisioningUpdates")
+    upload_to_app_store(
+      force: true,
+      submit_for_review: false,
+      automatic_release: false,
+      precheck_include_in_app_purchases: false,
+      skip_binary_upload: false,
+      metadata_path: "./metadata",
+      screenshots_path: "./screenshots",
+      app_review_information: {
+        notes: File.read("metadata/review_notes.txt"),
+      },
+    )
+  end
+end

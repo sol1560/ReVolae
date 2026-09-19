@@ -1,0 +1,5 @@
+# 填 Sol 的账号信息后再跑；也可用环境变量 FASTLANE_USER / APP_STORE_CONNECT_API_KEY_PATH
+app_identifier("dev.cuaremote.app")   # 与 Xcode target 的 bundle id 一致，改了这里也要改 Snapfile
+apple_id(ENV["FASTLANE_APPLE_ID"])
+team_id(ENV["FASTLANE_TEAM_ID"])
+itc_team_id(ENV["FASTLANE_ITC_TEAM_ID"])

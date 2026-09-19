@@ -1,0 +1,7 @@
+审核说明 / Review notes
+
+The app is a controller for the user's own Mac. To test without a Mac, launch with the argument "-CUAREMOTE_DEMO 1" (set in the review build's scheme) — it connects to a built-in demo device and shows the full flow: send a command, watch steps, approve a sensitive step with Face ID (simulator: Features → Face ID → Matching), open the terminal.
+
+Camera is only used to scan a pairing QR code. Microphone/speech are only used when the user holds the talk button; recognition runs on-device. Local network access is used for direct Wi‑Fi connection to the user's paired Mac (Bonjour _cuaremote._tcp).
+
+No account is required for the demo. Real use requires a free CuaRemote account (email) or a self-hosted server.

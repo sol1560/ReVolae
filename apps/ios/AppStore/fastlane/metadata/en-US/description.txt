@@ -1,0 +1,20 @@
+CuaRemote is not a remote desktop. You tell your phone what you want; an agent on your Mac decides whether to use the shell, AppleScript, Shortcuts or GUI automation, does it, and reports back.
+
+What you can do
+• "Run the deploy script", "Send proposal.pdf from my desktop to Zhang San" — type it or hold to talk
+• Watch every step live and cancel at any time
+• Sensitive actions (system-level commands, installing software, payment apps) are pushed to your phone and only continue after Face ID
+• A full remote terminal and SSH client with command blocks you can fold, copy and ask about ("why did that fail?")
+• Control an iPad through a small USB accessory that looks like an ordinary keyboard and mouse to the iPad — no app can tell
+• One phone, many Macs / iPads / Android devices
+
+Privacy is yours to configure
+• Run the agent brain on your own Mac or in the cloud — your choice
+• Models: standard cloud, zero-data-retention endpoints, your own API key, or fully local (Ollama / LM Studio)
+• Decide per item whether history, screenshots, logs and shortcuts sync; synced data is end-to-end encrypted and unreadable to the server
+• Phone-to-Mac traffic is end-to-end encrypted; the server only relays
+
+Open source
+The core (Mac agent, protocol, brain, safety pre-check) is AGPL-3.0; you can self-host the server.
+
+Requires the CuaRemote desktop app on a Mac running macOS 26 or later. iPad control requires a separate USB accessory.

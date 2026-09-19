@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
-import { approvalChallenge, approvalSignedPayload, controlFrame, encodeRelay } from "../src/index.js";
+import { approvalChallenge, approvalSignedPayload, controlFrame, encodeMediaFrame, encodeRelay, terminalOpenChallenge } from "../src/index.js";
 import { E2ELink, SealContext, deriveKemKeyPair, hex, relayHeader, sessionInfo } from "../src/hpke.js";
 import { signApproval } from "../src/approval.js";
 import { p256 } from "@noble/curves/nist.js";
@@ -27,6 +27,8 @@ writeFileSync(join(swiftDir, "binary.json"), JSON.stringify({
   frameHex: Buffer.from(frame).toString("hex"),
   relayHex: Buffer.from(relay).toString("hex"),
   challenge: approvalChallenge({ runId: "r1", stepId: "s1", actionDetail: "rm -rf ~/x", nonce: "n0", expiresAt: 1700000000 }),
+  terminalOpenChallenge: terminalOpenChallenge({ sessionId: "sess-1", nonce: "n1", expiresAt: 1700000300 }),
+  mediaFrameHex: Buffer.from(encodeMediaFrame({ keyframe: true, hasParameterSets: true, pts: 0x01020304, width: 1440, height: 900, data: new Uint8Array([0, 0, 0, 1, 0x67, 0xaa]) })).toString("hex"),
 }, null, 2));
 
 // ---- HPKE 互通向量（确定性：密钥由固定种子派生，临时密钥由固定 ekm 派生） ----

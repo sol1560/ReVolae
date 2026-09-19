@@ -1,0 +1,17 @@
+/* 放进 target 的 InfoPlist.strings（zh-Hans）；英文版见下方注释 */
+"NSFaceIDUsageDescription" = "用 Face ID 确认敏感操作（系统级命令、打开远程终端）。";
+"NSCameraUsageDescription" = "扫描 Mac 上显示的配对二维码。";
+"NSMicrophoneUsageDescription" = "按住说话，把语音变成指令。";
+"NSSpeechRecognitionUsageDescription" = "在本机把语音转成文字，不上传录音。";
+"NSLocalNetworkUsageDescription" = "在同一 Wi‑Fi 下直接连接你的 Mac，不经过服务器。";
+/* Info.plist 还要加：
+   NSBonjourServices = ["_cuaremote._tcp"]
+   UIBackgroundModes = ["remote-notification"]
+   ITSAppUsesNonExemptEncryption = NO（只用标准加密 HPKE/AES，免申报；若上架法务另有要求再改）
+   en-US:
+   NSFaceIDUsageDescription = "Confirm sensitive actions (system-level commands, opening a remote terminal) with Face ID."
+   NSCameraUsageDescription = "Scan the pairing QR code shown on your Mac."
+   NSMicrophoneUsageDescription = "Hold to talk and turn speech into a command."
+   NSSpeechRecognitionUsageDescription = "Transcribe speech on-device; recordings are not uploaded."
+   NSLocalNetworkUsageDescription = "Connect directly to your Mac on the same Wi‑Fi without going through a server."
+*/

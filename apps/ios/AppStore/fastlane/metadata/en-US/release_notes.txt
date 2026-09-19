@@ -1,0 +1,1 @@
+First release: text commands, live progress, Face ID approval, remote terminal and SSH, iPad control, multi-device.

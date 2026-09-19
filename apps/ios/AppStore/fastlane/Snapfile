@@ -1,0 +1,10 @@
+# 截图机型：App Store 现在只强制 6.9" 与 13"；其余尺寸由后台缩放
+devices(["iPhone 17 Pro Max", "iPad Pro 13-inch (M5)"])
+languages(["zh-Hans", "en-US"])
+scheme("CuaRemoteUITests")
+output_directory("./screenshots")
+clear_previous_screenshots(true)
+override_status_bar(true)
+localize_simulator(true)
+# UI 测试里用 launch argument 切到演示数据，不连真实 hub
+launch_arguments(["-CUAREMOTE_DEMO 1"])
