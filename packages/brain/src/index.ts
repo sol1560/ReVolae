@@ -12,3 +12,6 @@ export { McpStdioClient } from "./gui/mcp-stdio-client.js";
 export { runIntent, describe, type AgentDeps, type ApprovalGate, type ApprovalRequest, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
 export { runHostMode } from "./host-mode.js";
 export { JsonlLog } from "./log.js";
+export { RelayHost } from "./host/relay-host.js";
+export { PeerLinks } from "./cloud/peer-links.js";
+export { CloudBrain, type CloudBrainOptions } from "./cloud/cloud-brain.js";

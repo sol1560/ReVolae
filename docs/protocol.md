@@ -91,3 +91,17 @@ Mac `cuaremote pair` 打印 `PairOffer` 二维码（JSON）。手机扫码后：
 - 计量：`usage.report` 按账号入库，`GET /api/usage?since=` 查汇总。
 
 HTTP 接口都用 `Authorization: Bearer <sessionToken>`：`POST /api/pair/code`、`GET /api/devices`、`GET /api/usage`、`DELETE /api/pairings?peer=`；`GET /healthz` 免鉴权。
+
+## 云端大脑
+
+hub 设了 `HUB_CLOUD_BRAIN_PROVIDER=<provider:model>` 时，每个账号在第一个端登录时会挂上一个进程内的虚拟端点 `brain:<accountId>`（role `brain`，platform `cloud`）。它不走 WebSocket 也不走 hello/auth，但在 hub 眼里和别的端一样：有 devices 表记录、有 presence、发信封同样受 `from`/`canTalk` 校验。它的长期密钥存在 `brain_keys` 表（X25519 种子 + Ed25519 签名密钥），hub 重启后 id 和公钥不变，手机固定过的公钥不会失效。
+
+谁能和大脑说话：`canTalk` 放行「配过对」或「同账号且一方是 brain」。所以手机和被控设备登录后，hub 会额外推一条 `brain:<account>` 的 `peer.keys` + `presence`；大脑上线时也会推给账号里所有在线的端。
+
+手机侧的用法：隐私设置 `brainLocation = cloud` 时，把 `intent.submit`（`deviceId` 填目标设备）、`approval.decision`、`run.cancel` 用端到端链路封给 `brain:<account>`，而不是封给设备。大脑回来的 `run.*` / `step.*` / `plan.*` / `error` 也是密文，from 是 `brain:<account>`。
+
+设备侧的义务（daemon 实现）：来自 `brain:<account>` 的 `tools.list` / `tools.call` 要像响应本地大脑一样响应（`tools.list.result` / `tools.result`），并在隐私设置变化时把 `privacy.state` 也发一份给大脑，大脑用其中的 `jevEnabled` / `autonomy` 给这台设备上的 run 定档位。大脑不处理 pty / media 帧。
+
+确认步骤：大脑发 `step.approval_required{challenge, expiresAt}` 给手机并记住 challenge；手机回的 `approval.decision` 必须带签名，大脑按「审批签名」一节的规则用手机的签名公钥验（无签名、过期、nonce 重复、challenge 不匹配都判拒绝，并回 `error{code:"approval_<原因>"}`），验不过这一步按用户拒绝处理，设备上什么都不会跑。
+
+顺序保证：同一个对端发来的信封大脑按到达顺序串行处理（握手帧建链路是异步的，紧跟着的密文不能抢在前面）。对端掉线时，大脑里等它回结果的调用全部判失败，涉及它的 run 取消，链路作废，重连要重新握手。

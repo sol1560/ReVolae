@@ -56,6 +56,22 @@ export interface HubOptions {
   sessionTtlSec?: number;
   pairCodeTtlSec?: number;
   log?: (line: string) => void;
+  /** 某个端登录成功 / 掉线（云端大脑管理器靠这个按账号起大脑、清理掉线设备） */
+  onPresence?: (ev: { deviceId: string; role: Role; accountId: string; platform: string; online: boolean }) => void;
+}
+
+/** 进程内挂到 hub 上的虚拟端点（云端大脑用）：不走 WebSocket，也不走 hello/auth */
+export interface AttachedEndpoint {
+  deviceId: string;
+  role: Role;
+  accountId: string;
+  platform: string;
+  name: string;
+  pubKeys: PublicKeys;
+  /** hub 发给这个端点的 RelayEnvelope */
+  onBinary: (bytes: Uint8Array) => void;
+  /** hub 发给这个端点的控制消息（presence / peer.keys / error 等），可不接 */
+  onText?: (m: MsgBody & { id: string; ts: number }) => void;
 }
 
 const UNCLAIMED = "unclaimed";
@@ -106,6 +122,8 @@ export class Hub {
       this.online.delete(s.deviceId);
       this.store.touch(s.deviceId, this.now());
       this.broadcastPresence(s.deviceId, false);
+      if (s.role !== "brain") for (const b of this.accountBrains(s.accountId!)) this.reply(b, { type: "presence", deviceId: s.deviceId, online: false, lastSeen: this.now() });
+      this.o.onPresence?.({ deviceId: s.deviceId, role: s.role!, accountId: s.accountId!, platform: this.store.getDevice(s.deviceId)?.platform ?? "", online: false });
     }
   }
 
@@ -114,6 +132,63 @@ export class Hub {
     if (!s) return;
     if (typeof data === "string") return this.onText(s, data);
     this.onBinary(s, data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+  }
+
+  /**
+   * 把一个进程内端点当成已登录的连接挂上来。返回 send（它往外发 RelayEnvelope，和 ws 端点一样受 from/canTalk 校验）和 detach。
+   */
+  attachEndpoint(ep: AttachedEndpoint): { send: (bytes: Uint8Array) => void; detach: () => void } {
+    const conn: Conn = {
+      send: (d) => {
+        if (typeof d === "string") ep.onText?.(JSON.parse(d));
+        else ep.onBinary(d);
+      },
+      close: () => this.onClose(conn),
+    };
+    const now = this.now();
+    this.store.upsertDevice({ deviceId: ep.deviceId, accountId: ep.accountId, role: ep.role, platform: ep.platform, name: ep.name, kem: ep.pubKeys.kem, sig: ep.pubKeys.sig, sigAlg: ep.pubKeys.sigAlg }, now);
+    const prev = this.online.get(ep.deviceId);
+    if (prev) {
+      this.sessions.delete(prev.conn);
+      prev.conn.close(4000, "replaced");
+    }
+    const s: Session = { conn, state: "authed", accountId: ep.accountId, deviceId: ep.deviceId, role: ep.role };
+    this.sessions.set(conn, s);
+    this.online.set(ep.deviceId, s);
+    this.log(`挂载 ${ep.role} ${ep.deviceId} account=${ep.accountId}`);
+    this.announce(s, now);
+    return {
+      send: (bytes) => this.onBinary(s, bytes),
+      detach: () => this.onClose(conn),
+    };
+  }
+
+  /** 同账号里在线的云端大脑 */
+  private accountBrains(accountId: string): Session[] {
+    return [...this.online.values()].filter((x) => x.role === "brain" && x.accountId === accountId);
+  }
+
+  /** 登录后的通知：把对端公钥/在线状态推给它，把它上线的消息推给对端 */
+  private announce(s: Session, now: number) {
+    const id = s.deviceId!;
+    const push = (to: Session, peer: DeviceRow, online: boolean) => {
+      this.reply(to, { type: "peer.keys", deviceId: peer.deviceId, pubKeys: keysOf(peer) });
+      this.reply(to, { type: "presence", deviceId: peer.deviceId, online, lastSeen: online ? now : peer.lastSeen });
+    };
+    for (const peerId of this.store.peersOf(id)) {
+      const peer = this.store.getDevice(peerId);
+      if (peer) push(s, peer, this.online.has(peerId));
+    }
+    const me = this.store.getDevice(id)!;
+    if (s.role === "brain") {
+      // 大脑上线：告诉账号下所有在线的端
+      for (const x of this.online.values()) if (x !== s && x.accountId === s.accountId && x.state === "authed") push(x, me, true);
+    } else if (s.accountId !== UNCLAIMED) {
+      // 普通端上线：把账号里的大脑告诉它
+      for (const b of this.accountBrains(s.accountId!)) push(s, this.store.getDevice(b.deviceId!)!, true);
+    }
+    this.broadcastPresence(id, true);
+    this.o.onPresence?.({ deviceId: id, role: s.role!, accountId: s.accountId!, platform: me.platform, online: true });
   }
 
   // ───────────────────────── 文本：HubMessage ─────────────────────────
@@ -229,14 +304,7 @@ export class Hub {
     this.httpSessions.set(s.sessionToken, { deviceId: h.deviceId, accountId: s.accountId!, role: h.role, expiresAt });
     this.reply(s, { type: "auth.ok", sessionToken: s.sessionToken, expiresAt });
     this.log(`登录 ${h.role} ${h.deviceId} (${h.name}) account=${s.accountId}`);
-    // 把配过对的对端公钥和在线状态推给它，并告诉对端我上线了
-    for (const peerId of this.store.peersOf(h.deviceId)) {
-      const peer = this.store.getDevice(peerId);
-      if (!peer) continue;
-      this.reply(s, { type: "peer.keys", deviceId: peerId, pubKeys: { kem: peer.kem, sig: peer.sig, sigAlg: peer.sigAlg } });
-      this.reply(s, { type: "presence", deviceId: peerId, online: this.online.has(peerId), lastSeen: this.online.has(peerId) ? now : peer.lastSeen });
-    }
-    this.broadcastPresence(h.deviceId, true);
+    this.announce(s, now);
   }
 
   private onPushSend(s: Session, m: Extract<HubMessage, { type: "push.send" }>) {

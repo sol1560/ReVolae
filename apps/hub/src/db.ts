@@ -105,7 +105,26 @@ CREATE TABLE IF NOT EXISTS usage (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS usage_account_at ON usage(account_id, at);
+CREATE TABLE IF NOT EXISTS brain_keys (
+  account_id TEXT PRIMARY KEY,
+  kem_seed TEXT NOT NULL,
+  sig_priv TEXT NOT NULL,
+  sig_pub TEXT NOT NULL,
+  sig_alg TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
+
+/** 云端大脑的长期密钥（每个账号一套，base64） */
+export interface BrainKeyRow {
+  accountId: string;
+  /** X25519 的 32 字节种子，用 deriveKemKeyPair 恢复 */
+  kemSeed: string;
+  sigPriv: string;
+  sigPub: string;
+  sigAlg: PublicKeys["sigAlg"];
+  createdAt: number;
+}
 
 export class HubStore {
   readonly db: Database;
@@ -243,6 +262,20 @@ export class HubStore {
       steps: r.steps ?? 0,
       jevCalls: r.jev_calls ?? 0,
     };
+  }
+
+  // ── 云端大脑密钥 ──
+  getBrainKeys(accountId: string): BrainKeyRow | null {
+    const r = this.db.query<Record<string, unknown>, [string]>("SELECT * FROM brain_keys WHERE account_id = ?").get(accountId);
+    return r
+      ? { accountId: r.account_id as string, kemSeed: r.kem_seed as string, sigPriv: r.sig_priv as string, sigPub: r.sig_pub as string, sigAlg: r.sig_alg as PublicKeys["sigAlg"], createdAt: r.created_at as number }
+      : null;
+  }
+
+  putBrainKeys(k: BrainKeyRow) {
+    this.db
+      .query("INSERT OR IGNORE INTO brain_keys (account_id, kem_seed, sig_priv, sig_pub, sig_alg, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(k.accountId, k.kemSeed, k.sigPriv, k.sigPub, k.sigAlg, k.createdAt);
   }
 
   listUsage(accountId: string, since: number): UsageRow[] {

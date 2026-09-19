@@ -18,7 +18,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 ## M1 - Mac MVP [RUNNING]
 - F1.1 hub [DONE] apps/hub：Bun.serve WS 中继 + 公钥挑战登录 + 配对撮合（HMAC 端到端验）+ 6 位码 + 推送 dry-run/APNs + 用量 + bun:sqlite + 多账号 JWT；6 个集成测试
 - F1.2 HPKE + 审批签名 [DONE] hpke.ts/approval.ts；RFC 9180 A.2.3 向量通过；Swift 互通向量 fixtures/hpke.json+approval.json；protocol 25 测试
-- F1.3 云端大脑 [PENDING]
+- F1.3 云端大脑 [DONE] packages/brain/src/cloud/{cloud-brain,peer-links}.ts + host/relay-host.ts；apps/hub/src/cloud-brain.ts CloudBrainManager（brain:<account>，密钥落 brain_keys 表，hub.attachEndpoint 进程内挂载）；apps/hub/test/cloud-brain.test.ts 端到端（签名确认、拒无签名、拒重放、设备掉线）通过
 - F1.4 daemon-macos（runner A）[PENDING]
 - F1.5 ios（runner B）[PENDING]
 - F1.6 学习应用 [PENDING]

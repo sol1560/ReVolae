@@ -1,8 +1,10 @@
 /**
  * `bun run apps/hub/src/server.ts [--port 8788] [--db hub.db]`
  * 环境变量：HUB_PORT、HUB_DB、HUB_JWT_SECRET、HUB_PUBLIC_URL、APNS_TEAM_ID/APNS_KEY_ID/APNS_KEY_PEM/APNS_TOPIC/APNS_SANDBOX
+ *          HUB_CLOUD_BRAIN_PROVIDER（设了就开云端大脑，值是默认模型 id）
  */
 import type { Server } from "bun";
+import { CloudBrainManager, type CloudBrainOptions } from "./cloud-brain.js";
 import { HubStore } from "./db.js";
 import { Hub, type Conn, type HubOptions } from "./hub.js";
 import { pushFromEnv } from "./push.js";
@@ -11,8 +13,16 @@ interface WsData {
   conn?: Conn;
 }
 
-export function createHubServer(opts: HubOptions & { port?: number; hostname?: string }): { server: Server<WsData>; hub: Hub; url: string } {
-  const hub = new Hub(opts);
+export function createHubServer(opts: HubOptions & { port?: number; hostname?: string; cloudBrain?: CloudBrainOptions }): { server: Server<WsData>; hub: Hub; url: string; cloudBrain?: CloudBrainManager } {
+  let cloudBrain: CloudBrainManager | undefined;
+  const hub = new Hub({
+    ...opts,
+    onPresence: (ev) => {
+      cloudBrain?.onPresence(ev);
+      opts.onPresence?.(ev);
+    },
+  });
+  if (opts.cloudBrain) cloudBrain = new CloudBrainManager(hub, opts.cloudBrain);
   const server = Bun.serve<WsData>({
     port: opts.port ?? 8788,
     hostname: opts.hostname ?? "0.0.0.0",
@@ -41,7 +51,7 @@ export function createHubServer(opts: HubOptions & { port?: number; hostname?: s
       return r ?? new Response("CuaRemote hub\n", { status: 404 });
     },
   });
-  return { server, hub, url: `ws://${server.hostname}:${server.port}/ws` };
+  return { server, hub, url: `ws://${server.hostname}:${server.port}/ws`, cloudBrain };
 }
 
 if (import.meta.main) {
@@ -59,6 +69,7 @@ if (import.meta.main) {
     jwtSecret: process.env.HUB_JWT_SECRET,
     publicURL: process.env.HUB_PUBLIC_URL ?? `ws://localhost:${port}/ws`,
     log: (l) => console.log(`[hub] ${l}`),
+    cloudBrain: process.env.HUB_CLOUD_BRAIN_PROVIDER ? { defaultProvider: process.env.HUB_CLOUD_BRAIN_PROVIDER, log: (r) => console.log(`[brain] ${JSON.stringify(r)}`) } : undefined,
   });
-  console.log(`[hub] 监听 ${url}  db=${dbPath}  push=${hub.push.kind}  模式=${hub.singleUser ? "单机（不校验 JWT）" : "多账号"}`);
+  console.log(`[hub] 监听 ${url}  db=${dbPath}  push=${hub.push.kind}  模式=${hub.singleUser ? "单机（不校验 JWT）" : "多账号"}  云端大脑=${process.env.HUB_CLOUD_BRAIN_PROVIDER ?? "关"}`);
 }

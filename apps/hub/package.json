@@ -10,6 +10,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@cuaremote/brain": "workspace:*",
     "@cuaremote/protocol": "workspace:*",
     "zod": "^4.1.0"
   },

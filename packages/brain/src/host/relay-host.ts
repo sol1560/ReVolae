@@ -20,12 +20,16 @@ export class RelayHost implements Host {
   ) {}
 
   /** 设备那边解密后的帧喂进来 */
-  async handleFrame(frame: Uint8Array) {
+  handleFrame(frame: Uint8Array) {
     const f = decodeFrame(frame);
     if (f.kind !== 0) return; // pty / media 帧云端大脑不处理
     const parsed = AnyMessage.safeParse(parseControl(f));
     if (!parsed.success) return;
-    const m = parsed.data;
+    this.handleMessage(parsed.data);
+  }
+
+  /** 已经解析好的消息（CloudBrain 先按类型分流后再交给对应设备的宿主） */
+  handleMessage(m: AnyMessage) {
     if (m.type === "tools.result") {
       const p = this.pending.get(m.callId);
       if (p) {
