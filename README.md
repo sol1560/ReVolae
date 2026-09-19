@@ -23,11 +23,23 @@
 
 ```sh
 bun install
-bun test
-bun run --filter @cuaremote/brain cli -- run "列出桌面上的 pdf" --provider mock
+bun test                                                           # 全部 TS 测试，不需要任何 key
+bun run packages/brain/src/cli.ts run "列出桌面上的 pdf" --provider mock   # 本地大脑 + 假模型跑一遍
+bun run apps/poc-web/src/server.ts --port 8787 --no-gui              # 网页原型：浏览器代替手机
 ```
 
-详见 [docs/](docs/)。
+真模型：`--provider anthropic:<model>` / `openai:<model>` / `zenmux:<model>` / `ollama:<model>`，key 放环境变量（`ANTHROPIC_API_KEY` 等）。Jev 预检要 `TYPESAFE_API_KEY`，没有就退化成静态规则 + 更多确认。
+
+## 文档
+
+- [docs/architecture.md](docs/architecture.md)：四层怎么接、一次意图怎么走、大脑放哪。
+- [docs/protocol.md](docs/protocol.md)：消息格式、签名、加密、配对、终端、同步、计费。
+- [docs/security.md](docs/security.md)：三级分级、预检顺序、数据去向、挡不住的事。
+- [CONTRIBUTING.md](CONTRIBUTING.md)：环境、改协议的规矩、测试、PR。
+
+## 现状
+
+TypeScript 部分（协议、大脑、hub、网页原型、iPad 校准、Android adb 路径、终端）与 Android 端、dongle 固件已有代码和测试；Swift 的 Mac daemon 与 iOS app 目录尚空，等 macOS 机器上开工。各功能进度见 [state/progress.md](state/progress.md)。
 
 ## 许可
 

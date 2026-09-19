@@ -1,23 +1,27 @@
-name: ci
-on: [push, pull_request]
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
 jobs:
-  ts:
+  typescript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-  py:
+
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv run --project packages/jev-eval pytest
-  swift:
-    runs-on: macos-15
-    if: false # 打开条件：apps/daemon-macos 进入 CI 后
-    steps:
-      - uses: actions/checkout@v4
-      - run: swift build --package-path apps/daemon-macos
+      - run: uv run --with pytest pytest -q
+      - run: uv sync && uv run pytest -q
+        working-directory: packages/jev-eval
