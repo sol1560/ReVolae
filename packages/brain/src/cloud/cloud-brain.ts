@@ -19,7 +19,7 @@ import { RelayHost } from "../host/relay-host.js";
 import type { Host } from "../host/types.js";
 import { JevClient } from "../jev/client.js";
 import { PolicyEngine } from "../jev/policy.js";
-import { createProvider } from "../llm/providers.js";
+import { catalogMessage, resolveProvider } from "../llm/catalog.js";
 import { PeerLinks } from "./peer-links.js";
 
 export interface CloudBrainOptions {
@@ -44,7 +44,7 @@ interface RunState {
   deviceId: string;
 }
 
-const PHONE_TYPES = new Set(["intent.submit", "approval.decision", "run.cancel", "app.learn.start", "app.learn.stop", "app.card.run"]);
+const PHONE_TYPES = new Set(["intent.submit", "approval.decision", "run.cancel", "app.learn.start", "app.learn.stop", "app.card.run", "models.list"]);
 
 /**
  * 云端大脑：跑在 hub 进程里的一个虚拟端点。
@@ -205,6 +205,10 @@ export class CloudBrain {
       case "app.card.run":
         await this.startCard(phoneId, m);
         break;
+      case "models.list":
+        // 云端大脑机器上没有用户的本地模型，本地条目一律标不可用
+        await this.sendTo(phoneId, catalogMessage({ localUp: { ollama: false, lmstudio: false }, defaultModel: this.o.defaultProvider, brainLocation: "cloud" })).catch(() => {});
+        break;
       default:
         break; // approval.decision 由 waitPhone 消费
     }
@@ -217,7 +221,7 @@ export class CloudBrain {
     }
     let provider;
     try {
-      provider = createProvider(this.o.defaultProvider);
+      provider = resolveProvider({ settings: this.privacy.get(m.deviceId), defaultModel: this.o.defaultProvider });
     } catch (e) {
       await this.sendTo(phoneId, { type: "error", code: "provider", message: e instanceof Error ? e.message : String(e), ref: m.id });
       return;
@@ -286,10 +290,9 @@ export class CloudBrain {
 
   private async startRun(phoneId: string, m: Extract<AnyMessage, { type: "intent.submit" }>) {
     const deviceId = m.deviceId;
-    const providerId = m.provider ?? this.o.defaultProvider;
     let provider;
     try {
-      provider = createProvider(providerId);
+      provider = resolveProvider({ settings: this.privacy.get(deviceId), requested: m.provider, defaultModel: this.o.defaultProvider });
     } catch (e) {
       await this.sendTo(phoneId, { type: "error", code: "provider", message: e instanceof Error ? e.message : String(e), ref: m.id });
       return;

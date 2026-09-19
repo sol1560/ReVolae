@@ -540,6 +540,9 @@
             "localBrainModel": {
               "type": "string"
             },
+            "cloudModel": {
+              "type": "string"
+            },
             "localGuiModel": {
               "type": "string"
             },
@@ -785,6 +788,28 @@
         "type": {
           "type": "string",
           "const": "capabilities.get"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "models.list"
         }
       },
       "required": [
@@ -1862,6 +1887,9 @@
             "localBrainModel": {
               "type": "string"
             },
+            "cloudModel": {
+              "type": "string"
+            },
             "localGuiModel": {
               "type": "string"
             },
@@ -2259,6 +2287,105 @@
         "id",
         "type",
         "cards"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "models.catalog"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "standard",
+                  "zdr",
+                  "byok",
+                  "local"
+                ]
+              },
+              "zdr": {
+                "type": "boolean"
+              },
+              "vision": {
+                "type": "boolean"
+              },
+              "priceIn": {
+                "type": "number",
+                "minimum": 0
+              },
+              "priceOut": {
+                "type": "number",
+                "minimum": 0
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "unavailableReason": {
+                "type": "string"
+              },
+              "custom": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "provider",
+              "tier",
+              "zdr",
+              "vision",
+              "priceIn",
+              "priceOut",
+              "available",
+              "custom"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "defaultModel": {
+          "type": "string"
+        },
+        "brainLocation": {
+          "type": "string",
+          "enum": [
+            "local",
+            "cloud",
+            "lan"
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "models",
+        "defaultModel",
+        "brainLocation"
       ],
       "additionalProperties": false
     },

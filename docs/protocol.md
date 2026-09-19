@@ -137,3 +137,19 @@ iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`�
 - 指针位置由大脑预测跟踪；`ipad.screen` 带回 `pointer` 时以设备为准；宏失败或设备重连后视为未知，下一次点击先往左上角撞墙归零（用户会看到指针飞到左上角）。
 - 校准：先把指针挪到屏幕中部，再对 1/2/4/8/12/16/24/32/48/64/80 每个幅度按 +x/−x/+y/−y 各发一个**单报文**宏并读指针，共 44 个样本，拟合后存回设备。改了指针速度 / 显示缩放 / 横竖屏要重新校准。
 - 文本：美式键盘可直接敲的 ASCII 走 `key.type`（1024 字符一块）；含其它字符时整段写剪贴板再 Cmd+V。
+
+## 模型设置
+
+手机上的模型设置页 = 大脑回的清单 + 用户在隐私设置里的选择。大脑侧在 `packages/brain/src/llm/catalog.ts`。
+
+拿清单：手机发 `models.list{}`（本地大脑发给设备，云端大脑发给 `brain:<account>`），大脑回 `models.catalog{models, defaultModel, brainLocation}`。`models[]` 每条是 `ModelEntry`：`id`（`provider:model`）、`label`、`provider`、`tier`（这个模型能满足的最严档位：`local` / `zdr` / `byok` / `standard`）、`zdr`、`vision`、`priceIn` / `priceOut`（每百万 token 美元）、`available` / `unavailableReason`（缺 key、本机 Ollama / LM Studio 没开）、`custom`。本地大脑会探一次本机 Ollama（`/api/tags`）和 LM Studio（`/models`），云端大脑回的清单里本地条目一律不可用。
+
+用户选什么：`PrivacySettings` 里 `modelTier` 是档位，`localBrainModel` 是 `local` 档用的模型，`cloudModel` 是其它档用的模型；`intent.submit.provider` 可以临时指定一个。
+
+档位强制（`resolveProvider`），**选错直接报 `error{code:"provider"}`，绝不悄悄换成别的模型**：
+- `local`：只收 `ollama:` / `lmstudio:` 这类本地模型；
+- `zdr`：只收 `zdr=true` 的模型。厂商账号级 ZDR 是运营方和厂商签的合同，大脑靠环境变量 `ANTHROPIC_ZDR` / `OPENAI_ZDR` / `ZENMUX_ZDR` / `OPENAI_COMPAT_ZDR`=1 认；
+- `byok`：只收 `openai-compat:<model>@<baseUrl>`（用户自己的网关 / key）和本地模型；
+- `standard`：都收。
+
+选模型的顺序：`intent.submit.provider` → 档位对应的设置字段 → 大脑默认模型；每一步都要过档位检查。BYOK 的 key 建议只放本地大脑（Mac daemon 的环境变量），云端大脑不代管用户的 key。

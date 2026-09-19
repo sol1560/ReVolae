@@ -52,6 +52,8 @@ export const PrivacySettings = z.object({
   modelTier: ModelTier,
   /** 本地档位下的大脑模型 id（provider:model） */
   localBrainModel: z.string().optional(),
+  /** standard / zdr / byok 档位下的大脑模型 id；不填用大脑默认。选了 zdr 档位但这个模型不支持 ZDR 时大脑会拒绝而不是降级 */
+  cloudModel: z.string().optional(),
   /** 可选专用 GUI 模型 */
   localGuiModel: z.string().optional(),
   jevEnabled: z.boolean(),
@@ -59,6 +61,27 @@ export const PrivacySettings = z.object({
   autonomy: z.enum(["cautious", "balanced", "handsoff"]),
 });
 export type PrivacySettings = z.infer<typeof PrivacySettings>;
+
+/** 模型设置页的一行：大脑这一侧能不能用、为什么不能 */
+export const ModelEntry = z.object({
+  /** provider:model */
+  id: z.string(),
+  label: z.string(),
+  provider: z.string(),
+  tier: ModelTier,
+  zdr: z.boolean(),
+  vision: z.boolean(),
+  /** 每百万 token 美元；本地为 0 */
+  priceIn: z.number().nonnegative(),
+  priceOut: z.number().nonnegative(),
+  /** 这台大脑上现在能不能直接用（key 在不在 / 本地服务在不在） */
+  available: z.boolean(),
+  /** 不能用的原因，如「缺少环境变量 ZENMUX_API_KEY」 */
+  unavailableReason: z.string().optional(),
+  /** 用户自己加的（openai-compat / 自填模型名） */
+  custom: z.boolean().default(false),
+});
+export type ModelEntry = z.infer<typeof ModelEntry>;
 
 export const Cost = z.object({
   inputTokens: z.number().int().nonnegative(),

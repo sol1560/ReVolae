@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ApprovalSignature,
+  BrainLocation,
   CapabilityCard,
   Channel,
   ConcreteAction,
@@ -9,6 +10,7 @@ import {
   DeviceStats,
   HistoryItem,
   Level,
+  ModelEntry,
   PlanStep,
   PrecheckSource,
   PrivacySettings,
@@ -68,6 +70,8 @@ export const ShortcutRun = msg("shortcut.run", { shortcutId: z.string(), params:
 export const HistoryList = msg("history.list", { cursor: z.string().optional(), limit: z.number().int().positive().max(200).default(50) });
 export const PrivacySet = msg("privacy.set", { settings: PrivacySettings });
 export const PrivacyGet = msg("privacy.get", {});
+/** 问大脑（本地或云端）有哪些模型可选；本地大脑会顺带探测 Ollama / LM Studio 是否在跑 */
+export const ModelsList = msg("models.list", {});
 export const ScopeSet = msg("scope.set", { scope: Scope });
 /** deviceId：直接发给设备时可省；发给云端大脑时必填（大脑得知道去哪台设备扒 / 跑） */
 export const AppLearnStart = msg("app.learn.start", { bundleId: z.string(), explore: z.boolean().default(false), deviceId: z.string().optional() });
@@ -170,6 +174,13 @@ export const AppLearnProgress = msg("app.learn.progress", {
   message: z.string().optional(),
 });
 export const AppCards = msg("app.cards", { cards: z.array(CapabilityCard) });
+export const ModelsCatalog = msg("models.catalog", {
+  models: z.array(ModelEntry),
+  /** 大脑当前默认模型 id */
+  defaultModel: z.string(),
+  /** 这台大脑在哪跑：本地设备 / 云端 */
+  brainLocation: BrainLocation,
+});
 export const ShortcutsList = msg("shortcuts.list", { shortcuts: z.array(Shortcut) });
 export const ErrorMsg = msg("error", { code: z.string(), message: z.string(), ref: z.string().optional() });
 export const Ack = msg("ack", { ref: z.string() });
@@ -243,14 +254,14 @@ export const ApprovalResponse = msg("approval.response", { runId: z.string(), st
 export const PhoneToDevice = z.discriminatedUnion("type", [
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
-  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList,
 ]);
 export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
 
 export const DeviceToPhone = z.discriminatedUnion("type", [
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, MediaInfo, Stats, Capabilities, PrivacyState,
-  HistoryPage, AppLearnProgress, AppCards, ShortcutsList, ErrorMsg, Ack,
+  HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
 ]);
 export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
@@ -277,10 +288,10 @@ export type PeerMessage = z.infer<typeof PeerMessage>;
 export const AllMessages = {
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
-  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList,
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, MediaInfo, Stats, Capabilities, PrivacyState,
-  HistoryPage, AppLearnProgress, AppCards, ShortcutsList, ErrorMsg, Ack,
+  HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
   PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg,
   ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,

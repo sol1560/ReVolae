@@ -28,7 +28,7 @@ export function createProvider(id: string, env: Record<string, string | undefine
   switch (provider) {
     case "anthropic":
       return new AnthropicWireProvider(
-        { id, tier: "standard", zdr: false, vision: true, ...price },
+        { id, tier: env.ANTHROPIC_ZDR === "1" ? "zdr" : "standard", zdr: env.ANTHROPIC_ZDR === "1", vision: true, ...price },
         { baseUrl: env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com", apiKey: need(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY"), model },
       );
     case "openai":
@@ -38,7 +38,7 @@ export function createProvider(id: string, env: Record<string, string | undefine
       );
     case "zenmux":
       return new OpenAIWireProvider(
-        { id, tier: "standard", zdr: false, vision: true, ...price },
+        { id, tier: env.ZENMUX_ZDR === "1" ? "zdr" : "standard", zdr: env.ZENMUX_ZDR === "1", vision: true, ...price },
         { baseUrl: env.ZENMUX_BASE_URL ?? "https://zenmux.ai/api/v1", apiKey: need(env.ZENMUX_API_KEY, "ZENMUX_API_KEY"), model },
       );
     case "ollama":

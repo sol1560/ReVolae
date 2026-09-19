@@ -49,6 +49,9 @@
     "localBrainModel": {
       "type": "string"
     },
+    "cloudModel": {
+      "type": "string"
+    },
     "localGuiModel": {
       "type": "string"
     },

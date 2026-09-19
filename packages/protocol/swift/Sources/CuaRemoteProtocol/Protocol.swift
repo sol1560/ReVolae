@@ -431,6 +431,48 @@ public enum ModelTier: String, Codable, Sendable, CaseIterable {
     case local = "local"
 }
 
+public struct ModelEntry: Codable, Sendable {
+    public var id: String
+    public var label: String
+    public var provider: String
+    public var tier: ModelTier
+    public var zdr: Bool
+    public var vision: Bool
+    public var priceIn: Double
+    public var priceOut: Double
+    public var available: Bool
+    public var unavailableReason: String?
+    public var custom: Bool?
+
+    public init(id: String, label: String, provider: String, tier: ModelTier, zdr: Bool, vision: Bool, priceIn: Double, priceOut: Double, available: Bool, unavailableReason: String? = nil, custom: Bool? = nil) {
+        self.id = id
+        self.label = label
+        self.provider = provider
+        self.tier = tier
+        self.zdr = zdr
+        self.vision = vision
+        self.priceIn = priceIn
+        self.priceOut = priceOut
+        self.available = available
+        self.unavailableReason = unavailableReason
+        self.custom = custom
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case provider
+        case tier
+        case zdr
+        case vision
+        case priceIn
+        case priceOut
+        case available
+        case unavailableReason
+        case custom
+    }
+}
+
 public enum PlanStepStatus: String, Codable, Sendable, CaseIterable {
     case pending = "pending"
     case running = "running"
@@ -511,16 +553,18 @@ public struct PrivacySettings: Codable, Sendable {
     public var sync: SyncSettings
     public var modelTier: ModelTier
     public var localBrainModel: String?
+    public var cloudModel: String?
     public var localGuiModel: String?
     public var jevEnabled: Bool
     public var autonomy: PrivacySettingsAutonomy
 
-    public init(brainLocation: BrainLocation, brainDeviceId: String? = nil, sync: SyncSettings, modelTier: ModelTier, localBrainModel: String? = nil, localGuiModel: String? = nil, jevEnabled: Bool, autonomy: PrivacySettingsAutonomy) {
+    public init(brainLocation: BrainLocation, brainDeviceId: String? = nil, sync: SyncSettings, modelTier: ModelTier, localBrainModel: String? = nil, cloudModel: String? = nil, localGuiModel: String? = nil, jevEnabled: Bool, autonomy: PrivacySettingsAutonomy) {
         self.brainLocation = brainLocation
         self.brainDeviceId = brainDeviceId
         self.sync = sync
         self.modelTier = modelTier
         self.localBrainModel = localBrainModel
+        self.cloudModel = cloudModel
         self.localGuiModel = localGuiModel
         self.jevEnabled = jevEnabled
         self.autonomy = autonomy
@@ -532,6 +576,7 @@ public struct PrivacySettings: Codable, Sendable {
         case sync
         case modelTier
         case localBrainModel
+        case cloudModel
         case localGuiModel
         case jevEnabled
         case autonomy
@@ -1154,6 +1199,23 @@ public struct CapabilitiesGet: Codable, Sendable {
     }
 }
 
+public struct ModelsList: Codable, Sendable {
+    public static let messageType = "models.list"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "models.list"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
 public struct RunCreated: Codable, Sendable {
     public static let messageType = "run.created"
     public var v: Int = 1
@@ -1702,6 +1764,32 @@ public struct AppCards: Codable, Sendable {
         case id
         case `type`
         case cards
+    }
+}
+
+public struct ModelsCatalog: Codable, Sendable {
+    public static let messageType = "models.catalog"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "models.catalog"
+    public var models: [ModelEntry]
+    public var defaultModel: String
+    public var brainLocation: BrainLocation
+
+    public init(id: String, models: [ModelEntry], defaultModel: String, brainLocation: BrainLocation) {
+        self.id = id
+        self.models = models
+        self.defaultModel = defaultModel
+        self.brainLocation = brainLocation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case models
+        case defaultModel
+        case brainLocation
     }
 }
 
@@ -2409,6 +2497,7 @@ public enum AnyMessage: Codable, Sendable {
     case appCardRun(AppCardRun)
     case appCardsGet(AppCardsGet)
     case capabilitiesGet(CapabilitiesGet)
+    case modelsList(ModelsList)
     case runCreated(RunCreated)
     case planUpdated(PlanUpdated)
     case stepStarted(StepStarted)
@@ -2426,6 +2515,7 @@ public enum AnyMessage: Codable, Sendable {
     case historyPage(HistoryPage)
     case appLearnProgress(AppLearnProgress)
     case appCards(AppCards)
+    case modelsCatalog(ModelsCatalog)
     case shortcutsList(ShortcutsList)
     case errorMsg(ErrorMsg)
     case ack(Ack)
@@ -2475,6 +2565,7 @@ public enum AnyMessage: Codable, Sendable {
         case .appCardRun: return "app.card.run"
         case .appCardsGet: return "app.cards.get"
         case .capabilitiesGet: return "capabilities.get"
+        case .modelsList: return "models.list"
         case .runCreated: return "run.created"
         case .planUpdated: return "plan.updated"
         case .stepStarted: return "step.started"
@@ -2492,6 +2583,7 @@ public enum AnyMessage: Codable, Sendable {
         case .historyPage: return "history.page"
         case .appLearnProgress: return "app.learn.progress"
         case .appCards: return "app.cards"
+        case .modelsCatalog: return "models.catalog"
         case .shortcutsList: return "shortcuts.list"
         case .errorMsg: return "error"
         case .ack: return "ack"
@@ -2543,6 +2635,7 @@ public enum AnyMessage: Codable, Sendable {
         case "app.card.run": self = .appCardRun(try c.decode(AppCardRun.self))
         case "app.cards.get": self = .appCardsGet(try c.decode(AppCardsGet.self))
         case "capabilities.get": self = .capabilitiesGet(try c.decode(CapabilitiesGet.self))
+        case "models.list": self = .modelsList(try c.decode(ModelsList.self))
         case "run.created": self = .runCreated(try c.decode(RunCreated.self))
         case "plan.updated": self = .planUpdated(try c.decode(PlanUpdated.self))
         case "step.started": self = .stepStarted(try c.decode(StepStarted.self))
@@ -2560,6 +2653,7 @@ public enum AnyMessage: Codable, Sendable {
         case "history.page": self = .historyPage(try c.decode(HistoryPage.self))
         case "app.learn.progress": self = .appLearnProgress(try c.decode(AppLearnProgress.self))
         case "app.cards": self = .appCards(try c.decode(AppCards.self))
+        case "models.catalog": self = .modelsCatalog(try c.decode(ModelsCatalog.self))
         case "shortcuts.list": self = .shortcutsList(try c.decode(ShortcutsList.self))
         case "error": self = .errorMsg(try c.decode(ErrorMsg.self))
         case "ack": self = .ack(try c.decode(Ack.self))
@@ -2612,6 +2706,7 @@ public enum AnyMessage: Codable, Sendable {
         case .appCardRun(let v): try c.encode(v)
         case .appCardsGet(let v): try c.encode(v)
         case .capabilitiesGet(let v): try c.encode(v)
+        case .modelsList(let v): try c.encode(v)
         case .runCreated(let v): try c.encode(v)
         case .planUpdated(let v): try c.encode(v)
         case .stepStarted(let v): try c.encode(v)
@@ -2629,6 +2724,7 @@ public enum AnyMessage: Codable, Sendable {
         case .historyPage(let v): try c.encode(v)
         case .appLearnProgress(let v): try c.encode(v)
         case .appCards(let v): try c.encode(v)
+        case .modelsCatalog(let v): try c.encode(v)
         case .shortcutsList(let v): try c.encode(v)
         case .errorMsg(let v): try c.encode(v)
         case .ack(let v): try c.encode(v)

@@ -7,7 +7,7 @@ import { StdioHost } from "./host/stdio-host.js";
 import { JevClient } from "./jev/client.js";
 import { PolicyEngine } from "./jev/policy.js";
 import { fetchCard, learnApp, runCard } from "./learn/learn.js";
-import { createProvider } from "./llm/providers.js";
+import { catalogMessage, probeLocal, resolveProvider } from "./llm/catalog.js";
 import { JsonlLog } from "./log.js";
 
 /**
@@ -44,10 +44,9 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
     switch (m.type) {
       case "intent.submit": {
         const settings = stdio.privacy;
-        const providerId = m.provider ?? settings?.localBrainModel ?? opts.defaultProvider;
         let provider;
         try {
-          provider = createProvider(providerId);
+          provider = resolveProvider({ settings, requested: m.provider, defaultModel: opts.defaultProvider });
         } catch (e) {
           stdio.send({ type: "error", code: "provider", message: String(e instanceof Error ? e.message : e), ref: m.id });
           return;
@@ -73,7 +72,7 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
         const settings = stdio.privacy;
         let provider;
         try {
-          provider = createProvider(settings?.localBrainModel ?? opts.defaultProvider);
+          provider = resolveProvider({ settings, defaultModel: opts.defaultProvider });
         } catch (e) {
           stdio.send({ type: "error", code: "provider", message: String(e instanceof Error ? e.message : e), ref: m.id });
           return;
@@ -105,6 +104,11 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
       case "privacy.state":
         stdio.invalidateTools();
         break;
+      case "models.list": {
+        const localUp = await probeLocal();
+        stdio.send(catalogMessage({ localUp, defaultModel: opts.defaultProvider, brainLocation: "local" }));
+        break;
+      }
       default:
         break; // approval.decision 由 waitFor 消费；其他消息暂不处理
     }
