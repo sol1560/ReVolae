@@ -126,4 +126,13 @@ describe("有 Jev 时的裁决", () => {
     await p.decide(input(shell, { cmd: "echo hi" }));
     expect((await p.decide(input(shell, { cmd: "echo hi" }))).source).toBe("cache");
   });
+  test("命中缓存后仍要重算结论：说过「以后自动」的动作第二次放行", async () => {
+    const p = new PolicyEngine({ jev: new JevClient({ apiKey: "" }), autonomy: "balanced" });
+    const i = input(shell, { cmd: "echo hi" });
+    expect((await p.decide(i)).verdict).toBe("confirm");
+    p.remember(i.action);
+    const d = await p.decide(i);
+    expect(d.source).toBe("cache");
+    expect(d.verdict).toBe("allow");
+  });
 });

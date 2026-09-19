@@ -21,6 +21,7 @@
       "name": "@cuaremote/poc-web",
       "version": "0.1.0",
       "dependencies": {
+        "@cuaremote/brain": "workspace:*",
         "@cuaremote/protocol": "workspace:*",
         "zod": "^4.1.0",
       },

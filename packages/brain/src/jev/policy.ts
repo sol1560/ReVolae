@@ -91,8 +91,12 @@ export class PolicyEngine {
 
     // L2 一律确认，Jev 只用来补充信息，不能降级
     const key = createHash("sha256").update(JSON.stringify([input.intent, input.tool.name, input.action.detail])).digest("hex");
+    // 缓存的是 Jev 的评估结果，不是最终结论：用户刚说过「以后自动」，同一动作第二次必须重新算 verdict
     const cached = this.cache.get(key);
-    if (cached) return { ...cached, source: "cache" };
+    if (cached) {
+      const verdict = this.verdict({ level: cached.level, intentMatch: cached.intentMatch, risk: cached.risk, confidence: cached.confidence, source: cached.source, fingerprint: actionFingerprint(input.action) });
+      return { ...cached, verdict, source: "cache" };
+    }
 
     let level: Level = sLevel;
     let source: PrecheckSource = "static";

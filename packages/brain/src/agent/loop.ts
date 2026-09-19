@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { approvalChallenge, type Channel, type ConcreteAction, type Cost, type Level, type MsgBody, type PlanStep, type ToolDescriptor } from "@cuaremote/protocol";
+import { approvalChallenge, type Channel, type ConcreteAction, type Cost, type DeviceToPhone, type Level, type MsgBody, type PlanStep, type ToolDescriptor } from "@cuaremote/protocol";
 import { CuaDriver } from "../gui/cua-driver.js";
 import { jevAxDecide, toCuaCall } from "../gui/jev-ax.js";
 import type { Host, ToolResult } from "../host/types.js";
@@ -9,7 +9,7 @@ import type { ChatMessage, ContentPart, Provider, ToolCall, ToolSpec } from "../
 import { systemPrompt } from "./prompt.js";
 
 /** 大脑对外发出的消息（DeviceToPhone 子集） */
-export type BrainEvent = Extract<MsgBody, { type: `run.${string}` | `step.${string}` | `plan.${string}` | "terminal.suggestion" | "error" }>;
+export type BrainEvent = Extract<MsgBody<DeviceToPhone>, { type: `run.${string}` | `step.${string}` | `plan.${string}` | "terminal.suggestion" | "error" }>;
 
 export interface ApprovalRequest {
   runId: string;

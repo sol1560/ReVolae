@@ -10,8 +10,8 @@ Current: M0 - PoC
 - F0.4 brain agent loop + providers + CLI [DONE]
 - F0.5 Jev 客户端 + 策略引擎 [DONE]
 - F0.5b jev-ax [DONE]
-- F0.6 poc-web [PENDING]
-- F0.7 jev-eval [PENDING]
+- F0.6 poc-web [DONE] 11 测试；orb 内已起 :8787 并截图验证
+- F0.7 jev-eval [DONE-REMOTE] 线程 T-01a0b9e2 完成，待回收进主仓
 - F0.8 本地模型实测（runner A）[PENDING]
 - Scrutiny: PENDING · Cross-review: PENDING · Probe: PENDING · UX: PENDING
 

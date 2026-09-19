@@ -1,0 +1,5 @@
+services:
+  poc-web:
+    command: bun run apps/poc-web/src/server.ts --port 8787 --no-gui --autonomy balanced
+    port: 8787
+    portal: true

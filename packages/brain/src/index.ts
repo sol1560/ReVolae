@@ -9,6 +9,6 @@ export { PolicyEngine, staticLevel, actionFingerprint, type PolicyDecision, type
 export { CuaDriver, GUI_WHITELIST } from "./gui/cua-driver.js";
 export { jevAxDecide, toCuaCall, TARGET_CONFIDENCE_FLOOR } from "./gui/jev-ax.js";
 export { McpStdioClient } from "./gui/mcp-stdio-client.js";
-export { runIntent, describe, type AgentDeps, type ApprovalGate, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
+export { runIntent, describe, type AgentDeps, type ApprovalGate, type ApprovalRequest, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
 export { runHostMode } from "./host-mode.js";
 export { JsonlLog } from "./log.js";
