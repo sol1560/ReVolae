@@ -37,7 +37,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F3.4 实时画面 · F3.7 App Store 材料 [PENDING]
 
 ## M4 - Android [RUNNING]
-- F4.1 adb 工具 [PENDING]
+- F4.1 adb 工具 [DONE-orb 部分] LocalBunHost 有 adb 时暴露底层 android.adb（sh -c、image 模式 sips 转 JPEG）；packages/brain/src/android/adb-host.ts AdbHost 把它包成与 Android daemon 同名同参的 10 个 android.* + android.devices（uiautomator XML 解析、index 中心点缓存、单台自动选 serial 缓存 30 s、set_text 仅 ASCII、包名校验、dumpsys 通知解析）；host-mode 链 wrapIfIpad→wrapIfAdb，云端大脑非 ipados 设备包 AdbHost；15 测试；docs「Android（adb 路径）」节。Swift 宿主的 android.adb 归 runner A；未真机验证
 - F4.2 android-daemon [DONE] 已回收：无障碍/MediaProjection/十个 android.* 工具/HPKE/审批验签（gradle test 在源线程通过；orb 无 JDK 未复跑）
 - F4.3 android 控制端 [DONE-部分] Compose UI 全页面就位，但状态层还是本地假数据、未接真实 WebSocket/pair.request
 - F4.4 多设备 [PENDING]

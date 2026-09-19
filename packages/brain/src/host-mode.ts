@@ -1,6 +1,7 @@
 import type { AnyMessage } from "@cuaremote/protocol";
 import { runIntent, type ApprovalGate } from "./agent/loop.js";
 import { CuaDriver } from "./gui/cua-driver.js";
+import { wrapIfAdb } from "./android/adb-host.js";
 import { wrapIfIpad } from "./ipad/ipad-host.js";
 import type { Host } from "./host/types.js";
 import { StdioHost } from "./host/stdio-host.js";
@@ -16,10 +17,11 @@ import { JsonlLog } from "./log.js";
  */
 export async function runHostMode(opts: { defaultProvider: string; logPath?: string; cuaArgv?: string[] }) {
   const stdio = new StdioHost();
-  // 宿主如果是 iPad app（提供 ipad.screen / ipad.hid.macro），外面包一层绝对坐标工具。
+  // 宿主如果是 iPad app（提供 ipad.screen / ipad.hid.macro），外面包一层绝对坐标工具；
+  // 宿主有 android.adb（Mac 上装了 adb）就再包一层 android.* 工具。两层对不相干的宿主都透明。
   // 第一次有活干时才问工具表（启动时宿主可能还没开始读 stdin），之后复用同一个实例，保住校准和指针状态。
   let hostP: Promise<Host> | undefined;
-  const agentHost = () => (hostP ??= wrapIfIpad(stdio, { log: (r) => log?.write(r) }));
+  const agentHost = () => (hostP ??= wrapIfIpad(stdio, { log: (r) => log?.write(r) }).then((h) => wrapIfAdb(h, { log: (r) => log?.write(r) })));
   const jev = new JevClient();
   const log = opts.logPath ? new JsonlLog(opts.logPath) : undefined;
   const gui = new CuaDriver({ argv: opts.cuaArgv });

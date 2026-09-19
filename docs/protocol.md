@@ -48,7 +48,7 @@
 | `screenshot` | `{app?, window?, maxWidth?}` | 0 | SCStream 单帧 JPEG |
 | `apps.running` | `{}` | 0 | |
 | `app.explore` | `{bundleId, layer: sdef\|menu\|window\|shortcuts\|explore}` | 0 / explore=1 | 学习应用的数据源，回 JSON 文本 |
-| `android.adb` | `{serial, cmd}` | 1 | M4 |
+| `android.adb` | `{serial?, cmd, timeoutMs?, image?, maxWidth?}` | 1 | 机器上有 `adb`（PATH 或 `CUAREMOTE_ADB`）时才出现。`cmd` 是 adb 子命令（不含 `adb`），`image=true` 时把 stdout 当 PNG、缩成 JPEG 放附件。模型看不到它，见「Android（adb 路径）」 |
 
 `gui.*` 不在宿主里：brain 自己 spawn `cua-driver mcp` 并做白名单过滤（见 brain 文档）。宿主负责保证 cua-driver 的 TCC 归属（M1 用 `EmbeddedCuaDriverHost` 或让 brain 用 `cua-driver mcp --direct`）。
 
@@ -137,6 +137,25 @@ iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`�
 - 指针位置由大脑预测跟踪；`ipad.screen` 带回 `pointer` 时以设备为准；宏失败或设备重连后视为未知，下一次点击先往左上角撞墙归零（用户会看到指针飞到左上角）。
 - 校准：先把指针挪到屏幕中部，再对 1/2/4/8/12/16/24/32/48/64/80 每个幅度按 +x/−x/+y/−y 各发一个**单报文**宏并读指针，共 44 个样本，拟合后存回设备。改了指针速度 / 显示缩放 / 横竖屏要重新校准。
 - 文本：美式键盘可直接敲的 ASCII 走 `key.type`（1024 字符一块）；含其它字符时整段写剪贴板再 Cmd+V。
+
+## Android（adb 路径）
+
+Android 被控有两条路：装 `apps/android-daemon`（无障碍 + MediaProjection，功能全），或者**不装任何东西**，把手机用 USB / 无线调试连到一台有 `adb` 的 Mac 上。第二条路由 Mac 宿主的 `android.adb` 底层工具承担，大脑侧 `AdbHost`（`packages/brain/src/android/adb-host.ts`）把它翻成和 daemon **同名同参数**的工具，模型不用区分两条路：
+
+| 工具 | adb 实现 | 与 daemon 的差别 |
+|---|---|---|
+| `android.devices` | `adb devices -l` | daemon 没有此工具；多台在线时其它工具必须带 `serial` |
+| `android.screenshot{maxWidth?}` | `exec-out screencap -p`（image 模式） | 同 |
+| `android.ui_tree{maxElements?, maxDepth?}` | `uiautomator dump` + XML 解析 | 元素少、约 1 s；`index` 只到下一次 ui_tree 前有效 |
+| `android.tap / long_press{index \| x,y}` | `input tap` / `input swipe` 600 ms | 同 |
+| `android.swipe{fromX,fromY,toX,toY,durationMs?}` | `input swipe` | 同 |
+| `android.set_text{index,text}` | 先 `input tap` 元素再 `input text` | **只支持 ASCII**，非 ASCII 报错提示装 daemon |
+| `android.key{key}` | `input keyevent` 4/3/187/66/24/25 | 同 |
+| `android.launch{packageName}` | `monkey -p … -c LAUNCHER 1` | 同 |
+| `android.apps` | `pm list packages -3` | 只列第三方包 |
+| `android.notifications` | `dumpsys notification --noredact` | 只有包名 / 标题 / 正文 |
+
+接入位置：`brain --mode host` 里宿主链是 `StdioHost → wrapIfIpad → wrapIfAdb`；云端大脑对非 ipados 设备总是包一层 `AdbHost`（对没有 adb 的宿主透明）。只有一台在线时自动选它并缓存 30 s（命令失败即重查）。Swift 宿主的 `android.adb` 实现归 daemon-macos（`/bin/sh -c "adb [-s serial] <cmd>"`，`image=true` 时 stdout 走 `sips -Z maxWidth` 转 JPEG）。
 
 ## 模型设置
 

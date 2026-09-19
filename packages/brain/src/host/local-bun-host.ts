@@ -5,6 +5,8 @@ import type { Scope, ToolDescriptor } from "@cuaremote/protocol";
 import type { Host, ToolResult } from "./types.js";
 
 const isMac = process.platform === "darwin";
+/** 单引号包起来给 sh 用 */
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** 宿主本地工具表：Swift daemon 也要实现同一张表（docs/protocol.md） */
 export const LOCAL_TOOLS: ToolDescriptor[] = [
@@ -54,6 +56,17 @@ export const LOCAL_TOOLS: ToolDescriptor[] = [
   { name: "apps.running", description: "列出正在运行的应用（名字 + bundle id）。", channel: "app", staticLevel: 0, costClass: 0, dataLeavesDevice: true, inputSchema: { type: "object", properties: {} } },
 ];
 
+/**
+ * 有 adb 时多一个底层工具；模型看不到它，大脑侧 AdbHost 把它包成和 Android daemon 同名的 android.* 工具。
+ * cmd 是 adb 子命令（不含 "adb"），经 sh -c 运行；image=true 把 stdout 当图片（screencap -p 的 PNG），Mac 上用 sips 缩成 JPEG。
+ */
+export const ADB_TOOL: ToolDescriptor = {
+  name: "android.adb",
+  description: "对通过 adb 连接的 Android 设备执行一条 adb 子命令。",
+  channel: "android", staticLevel: 1, costClass: 0, dataLeavesDevice: true,
+  inputSchema: { type: "object", properties: { serial: { type: "string" }, cmd: { type: "string" }, timeoutMs: { type: "integer" }, image: { type: "boolean" }, maxWidth: { type: "integer" } }, required: ["cmd"] },
+};
+
 export interface LocalHostOptions {
   scope?: Partial<Scope>;
   shell?: string;
@@ -78,8 +91,13 @@ export class LocalBunHost implements Host {
   }
 
   async listTools() {
-    const tools = isMac ? LOCAL_TOOLS : LOCAL_TOOLS.filter((t) => !["applescript.run", "jxa.run", "shortcuts.run", "shortcuts.list"].includes(t.name));
+    const base = isMac ? LOCAL_TOOLS : LOCAL_TOOLS.filter((t) => !["applescript.run", "jxa.run", "shortcuts.run", "shortcuts.list"].includes(t.name));
+    const tools = this.adb() ? [...base, ADB_TOOL] : base;
     return { tools, scope: this.scope };
+  }
+
+  private adb(): string | undefined {
+    return process.env.CUAREMOTE_ADB || Bun.which("adb") || undefined;
   }
 
   async call(tool: string, args: Record<string, unknown>, timeoutMs = 60_000): Promise<ToolResult> {
@@ -124,6 +142,29 @@ export class LocalBunHost implements Host {
           const data = await readFile(file);
           return done({ ok: true, output: `截图 ${data.length} 字节`, attachments: [{ kind: "image/jpeg", inline: data.toString("base64") }] });
         }
+        case "android.adb": {
+          const adb = this.adb();
+          if (!adb) return done({ ok: false, error: "这台机器没有 adb" });
+          const serial = args.serial ? ["-s", String(args.serial)] : [];
+          const cmd = String(args.cmd ?? "");
+          const shellCmd = [adb, ...serial].map(shq).join(" ") + " " + cmd;
+          const to = Number(args.timeoutMs ?? 30_000);
+          if (!args.image) return done(await this.exec(["/bin/sh", "-c", shellCmd], { timeoutMs: to }));
+          const png = await this.execBytes(["/bin/sh", "-c", shellCmd], to);
+          if (!png.ok) return done({ ok: false, error: png.error, output: png.text });
+          if (png.bytes.length < 8) return done({ ok: false, error: "adb 没回图片数据" });
+          if (isMac) {
+            const src = `/tmp/cuaremote-adb-${Date.now()}.png`;
+            const dst = src.replace(/\.png$/, ".jpg");
+            await Bun.write(src, png.bytes);
+            const r = await this.exec(["sips", "-Z", String(Number(args.maxWidth ?? 720)), "-s", "format", "jpeg", "-s", "formatOptions", "70", src, "--out", dst], { timeoutMs: 15_000 });
+            if (r.ok) {
+              const jpg = await readFile(dst);
+              return done({ ok: true, output: `截图 ${jpg.length} 字节`, attachments: [{ kind: "image/jpeg", inline: jpg.toString("base64") }] });
+            }
+          }
+          return done({ ok: true, output: `截图 ${png.bytes.length} 字节（PNG 原图）`, attachments: [{ kind: "image/png", inline: Buffer.from(png.bytes).toString("base64") }] });
+        }
         case "apps.running": {
           if (!isMac) return done({ ok: false, error: "此平台没有实现" });
           return done(await this.exec(["osascript", "-e", 'tell application "System Events" to get {name, bundle identifier} of every application process whose background only is false'], { timeoutMs: 8_000 }));
@@ -161,6 +202,15 @@ export class LocalBunHost implements Host {
     }
     if (entries.length > 200) lines.push(`${indent}…还有 ${entries.length - 200} 项`);
     return lines.filter(Boolean).join("\n");
+  }
+
+  /** stdout 按字节拿（图片）；失败时 text 是 stderr */
+  private async execBytes(argv: string[], timeoutMs: number): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string; text: string }> {
+    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env: { ...process.env, CUAREMOTE: "1" } });
+    const timer = setTimeout(() => proc.kill(), timeoutMs);
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
+    clearTimeout(timer);
+    return code === 0 ? { ok: true, bytes: new Uint8Array(out) } : { ok: false, error: `退出码 ${code}`, text: err.slice(0, 4000) };
   }
 
   private async exec(argv: string[], o: { cwd?: string; timeoutMs: number; stdin?: string }): Promise<Omit<ToolResult, "ms" | "attachments">> {

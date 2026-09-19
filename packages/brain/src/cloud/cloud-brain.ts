@@ -15,6 +15,7 @@ import {
 } from "@cuaremote/protocol";
 import { runIntent, type ApprovalGate, type BrainEvent } from "../agent/loop.js";
 import { fetchCard, learnApp, runCard, type LearnEvent } from "../learn/learn.js";
+import { AdbHost } from "../android/adb-host.js";
 import { IpadHost } from "../ipad/ipad-host.js";
 import { RelayHost } from "../host/relay-host.js";
 import type { Host } from "../host/types.js";
@@ -69,6 +70,7 @@ export class CloudBrain {
   private readonly runs = new Map<string, RunState>();
   private readonly learns = new Map<string, AbortController>();
   private readonly ipadHosts = new Map<string, IpadHost>();
+  private readonly adbHosts = new Map<string, AdbHost>();
   private readonly verifiers = new Map<string, ApprovalVerifier>();
   private readonly privacy = new Map<string, PrivacySettings>();
   private readonly phoneListeners = new Set<(from: string, m: AnyMessage) => void>();
@@ -148,14 +150,25 @@ export class CloudBrain {
     return h;
   }
 
-  /** 给 agent / 卡片用的宿主：iPad 设备外面包一层绝对坐标工具（校准模型随实例缓存） */
+  /**
+   * 给 agent / 卡片用的宿主：
+   * - iPad 设备外面包一层绝对坐标工具（校准模型随实例缓存）
+   * - 其它设备（主要是 Mac）包一层 AdbHost：宿主工具表里有 android.adb 时把它翻成 android.* 工具，没有就透传（ui_tree 的 index 缓存随实例）
+   */
   private agentHostFor(deviceId: string): Host {
     const relay = this.hostFor(deviceId);
-    if (this.o.devicePlatform?.(deviceId) !== "ipados") return relay;
-    let h = this.ipadHosts.get(deviceId);
+    if (this.o.devicePlatform?.(deviceId) === "ipados") {
+      let h = this.ipadHosts.get(deviceId);
+      if (!h) {
+        h = new IpadHost(relay, { log: this.o.log });
+        this.ipadHosts.set(deviceId, h);
+      }
+      return h;
+    }
+    let h = this.adbHosts.get(deviceId);
     if (!h) {
-      h = new IpadHost(relay, { log: this.o.log });
-      this.ipadHosts.set(deviceId, h);
+      h = new AdbHost(relay, { log: this.o.log });
+      this.adbHosts.set(deviceId, h);
     }
     return h;
   }
