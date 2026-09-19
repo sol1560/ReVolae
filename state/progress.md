@@ -40,4 +40,4 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F4.1 adb 工具 [DONE-orb 部分] LocalBunHost 有 adb 时暴露底层 android.adb（sh -c、image 模式 sips 转 JPEG）；packages/brain/src/android/adb-host.ts AdbHost 把它包成与 Android daemon 同名同参的 10 个 android.* + android.devices（uiautomator XML 解析、index 中心点缓存、单台自动选 serial 缓存 30 s、set_text 仅 ASCII、包名校验、dumpsys 通知解析）；host-mode 链 wrapIfIpad→wrapIfAdb，云端大脑非 ipados 设备包 AdbHost；15 测试；docs「Android（adb 路径）」节。Swift 宿主的 android.adb 归 runner A；未真机验证
 - F4.2 android-daemon [DONE] 已回收：无障碍/MediaProjection/十个 android.* 工具/HPKE/审批验签（gradle test 在源线程通过；orb 无 JDK 未复跑）
 - F4.3 android 控制端 [DONE-部分] Compose UI 全页面就位，但状态层还是本地假数据、未接真实 WebSocket/pair.request
-- F4.4 多设备 [PENDING]
+- F4.4 多设备 [DONE-orb 部分] 协议：DeviceSummary、devices.list/devices.page、device.rename、device.unpair、pair.removed；hub：devicesFor（配过对 ∪ 同账号，去自己和大脑，别名优先，排序）、device_aliases 表（按账号）、unpair 统一入口（WS 与 DELETE /api/pairings 都走，通知双方）、GET /api/devices 改用同一份；测试：一部手机配两台 Mac 各走各的密文通道、A↔B 未配对 not_paired、列表/别名/解绑/下线 lastSeen（hub.test 7/7）；docs「多设备管理」节；schema/Swift 已重生成。iOS/Android 设备列表页归 runner B / Android 线程

@@ -20,6 +20,7 @@ import {
   hubAuthPayload,
   mkMsg,
   verifySignedPayload,
+  type DeviceSummary,
   type MsgBody,
   type PublicKeys,
   type SyncKind,
@@ -241,6 +242,19 @@ export class Hub {
         return this.onPairConfirm(s, m);
       case "pair.code.claim":
         return this.onPairCodeClaim(s, m);
+      case "devices.list":
+        return this.reply(s, { type: "devices.page", devices: this.devicesFor(s.deviceId!, s.accountId!) });
+      case "device.rename": {
+        if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号", m.id);
+        if (m.deviceId !== s.deviceId && !this.store.isPaired(s.deviceId!, m.deviceId)) return this.fail(s, "not_paired", `和 ${m.deviceId} 没配过对`, m.id);
+        this.store.setAlias(s.accountId!, m.deviceId, m.name, this.now());
+        return this.reply(s, { type: "ack", ref: m.id });
+      }
+      case "device.unpair": {
+        if (!this.store.isPaired(s.deviceId!, m.deviceId)) return this.fail(s, "not_paired", `和 ${m.deviceId} 没配过对`, m.id);
+        this.unpair(s.deviceId!, m.deviceId);
+        return this.reply(s, { type: "ack", ref: m.id });
+      }
       case "sync.put":
         return this.onSyncPut(s, m);
       case "sync.pull": {
@@ -261,6 +275,8 @@ export class Hub {
       case "auth.ok":
       case "pair.result":
       case "pair.offer":
+      case "pair.removed":
+      case "devices.page":
       case "sync.page":
         return this.fail(s, "not_allowed", `${m.type} 只能由 hub 发出`, m.id);
       case "error":
@@ -489,8 +505,7 @@ export class Hub {
       }
     }
     if (url.pathname === "/api/devices" && req.method === "GET") {
-      const devices = this.store.listAccountDevices(who.accountId).map((d) => ({ ...d, online: this.online.has(d.deviceId), paired: this.store.isPaired(who.deviceId, d.deviceId) }));
-      return Response.json({ devices });
+      return Response.json({ devices: this.devicesFor(who.deviceId, who.accountId) });
     }
     if (url.pathname === "/api/billing" && req.method === "GET") {
       if (!this.o.billing) return Response.json({ error: "billing_disabled" }, { status: 404 });
@@ -503,8 +518,7 @@ export class Hub {
     if (url.pathname === "/api/pairings" && req.method === "DELETE") {
       const peer = url.searchParams.get("peer") ?? "";
       if (!this.store.isPaired(who.deviceId, peer)) return Response.json({ error: "not_paired" }, { status: 404 });
-      this.store.removePairing(who.deviceId, peer);
-      this.store.removePairing(peer, who.deviceId);
+      this.unpair(who.deviceId, peer);
       return Response.json({ ok: true });
     }
     return Response.json({ error: "not_found" }, { status: 404 });
@@ -533,6 +547,48 @@ export class Hub {
 
   private fail(s: Session, code: string, message: string, ref?: string) {
     this.reply(s, { type: "error", code, message, ...(ref ? { ref } : {}) });
+  }
+
+  /**
+   * 多设备列表：我配过对的对端 ∪ 同账号下其它端（去掉自己和大脑），按配对优先、名字排序。
+   * 名字优先用本账号起的别名。
+   */
+  private devicesFor(selfId: string, accountId: string): DeviceSummary[] {
+    const ids = new Set<string>(this.store.peersOf(selfId));
+    if (accountId !== UNCLAIMED) for (const d of this.store.listAccountDevices(accountId)) ids.add(d.deviceId);
+    ids.delete(selfId);
+    const out: DeviceSummary[] = [];
+    for (const id of ids) {
+      const d = this.store.getDevice(id);
+      if (!d || d.role === "brain") continue;
+      const pairedAt = this.store.pairedAt(selfId, id);
+      const online = this.online.has(id);
+      out.push({
+        deviceId: id,
+        role: d.role,
+        platform: d.platform as DeviceSummary["platform"],
+        name: (accountId !== UNCLAIMED && this.store.getAlias(accountId, id)) || d.name,
+        online,
+        lastSeen: online ? this.now() : d.lastSeen,
+        paired: pairedAt !== undefined,
+        ...(pairedAt !== undefined ? { pairedAt } : {}),
+      });
+    }
+    return out.sort((a, b) => Number(b.paired) - Number(a.paired) || Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  }
+
+  /** 解绑：删两个方向的配对，通知双方（离线的一方下次登录时 announce 里自然没有对端了） */
+  private unpair(a: string, b: string) {
+    this.store.removePairing(a, b);
+    this.store.removePairing(b, a);
+    const ra = this.store.getDevice(a);
+    const [deviceId, phoneId] = ra?.role === "phone" ? [b, a] : [a, b];
+    const msg: MsgBody = { type: "pair.removed", deviceId, phoneId, by: a };
+    for (const id of [a, b]) {
+      const sess = this.online.get(id);
+      if (sess) this.reply(sess, msg);
+    }
+    this.log(`解绑 ${a} ↔ ${b}`);
   }
 
   private broadcastPresence(deviceId: string, onlineNow: boolean) {

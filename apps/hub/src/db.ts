@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS pairings (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (device_id, phone_id)
 );
+CREATE TABLE IF NOT EXISTS device_aliases (
+  account_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, device_id)
+);
 CREATE TABLE IF NOT EXISTS pair_codes (
   code TEXT PRIMARY KEY,
   device_id TEXT NOT NULL,
@@ -220,6 +227,23 @@ export class HubStore {
       .query<{ n: number }, [string, string, string, string]>("SELECT COUNT(*) AS n FROM pairings WHERE (device_id = ? AND phone_id = ?) OR (device_id = ? AND phone_id = ?)")
       .get(a, b, b, a);
     return (r?.n ?? 0) > 0;
+  }
+
+  /** 配对时间（任一方向） */
+  pairedAt(a: string, b: string): number | undefined {
+    const r = this.db
+      .query<{ created_at: number }, [string, string, string, string]>("SELECT created_at FROM pairings WHERE (device_id = ? AND phone_id = ?) OR (device_id = ? AND phone_id = ?) LIMIT 1")
+      .get(a, b, b, a);
+    return r?.created_at;
+  }
+
+  // ── 别名（按账号） ──
+  setAlias(accountId: string, deviceId: string, alias: string, now: number) {
+    this.db.query("INSERT INTO device_aliases (account_id, device_id, alias, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, device_id) DO UPDATE SET alias = excluded.alias, updated_at = excluded.updated_at").run(accountId, deviceId, alias, now);
+  }
+
+  getAlias(accountId: string, deviceId: string): string | undefined {
+    return this.db.query<{ alias: string }, [string, string]>("SELECT alias FROM device_aliases WHERE account_id = ? AND device_id = ?").get(accountId, deviceId)?.alias;
   }
 
   /** 和某个 id 配过对的所有对端 id */

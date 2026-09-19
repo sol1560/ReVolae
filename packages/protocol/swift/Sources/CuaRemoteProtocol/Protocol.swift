@@ -2383,6 +2383,150 @@ public struct PairOfferMsg: Codable, Sendable {
     }
 }
 
+public struct PairRemoved: Codable, Sendable {
+    public static let messageType = "pair.removed"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "pair.removed"
+    public var deviceId: String
+    public var phoneId: String
+    public var by: String
+
+    public init(id: String, deviceId: String, phoneId: String, by: String) {
+        self.id = id
+        self.deviceId = deviceId
+        self.phoneId = phoneId
+        self.by = by
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case deviceId
+        case phoneId
+        case by
+    }
+}
+
+public struct DevicesList: Codable, Sendable {
+    public static let messageType = "devices.list"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "devices.list"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public enum DevicesPageDevicesItemRole: String, Codable, Sendable, CaseIterable {
+    case device = "device"
+    case phone = "phone"
+}
+
+public struct DevicesPageDevicesItem: Codable, Sendable {
+    public var deviceId: String
+    public var role: DevicesPageDevicesItemRole
+    public var platform: DevicePlatform
+    public var name: String
+    public var online: Bool
+    public var lastSeen: Int
+    public var paired: Bool
+    public var pairedAt: Int?
+
+    public init(deviceId: String, role: DevicesPageDevicesItemRole, platform: DevicePlatform, name: String, online: Bool, lastSeen: Int, paired: Bool, pairedAt: Int? = nil) {
+        self.deviceId = deviceId
+        self.role = role
+        self.platform = platform
+        self.name = name
+        self.online = online
+        self.lastSeen = lastSeen
+        self.paired = paired
+        self.pairedAt = pairedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case deviceId
+        case role
+        case platform
+        case name
+        case online
+        case lastSeen
+        case paired
+        case pairedAt
+    }
+}
+
+public struct DevicesPage: Codable, Sendable {
+    public static let messageType = "devices.page"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "devices.page"
+    public var devices: [DevicesPageDevicesItem]
+
+    public init(id: String, devices: [DevicesPageDevicesItem]) {
+        self.id = id
+        self.devices = devices
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case devices
+    }
+}
+
+public struct DeviceRename: Codable, Sendable {
+    public static let messageType = "device.rename"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "device.rename"
+    public var deviceId: String
+    public var name: String
+
+    public init(id: String, deviceId: String, name: String) {
+        self.id = id
+        self.deviceId = deviceId
+        self.name = name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case deviceId
+        case name
+    }
+}
+
+public struct DeviceUnpair: Codable, Sendable {
+    public static let messageType = "device.unpair"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "device.unpair"
+    public var deviceId: String
+
+    public init(id: String, deviceId: String) {
+        self.id = id
+        self.deviceId = deviceId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case deviceId
+    }
+}
+
 public struct SyncPut: Codable, Sendable {
     public static let messageType = "sync.put"
     public var v: Int = 1
@@ -2827,6 +2971,11 @@ public enum AnyMessage: Codable, Sendable {
     case pairResult(PairResult)
     case pairCodeClaim(PairCodeClaim)
     case pairOfferMsg(PairOfferMsg)
+    case pairRemoved(PairRemoved)
+    case devicesList(DevicesList)
+    case devicesPage(DevicesPage)
+    case deviceRename(DeviceRename)
+    case deviceUnpair(DeviceUnpair)
     case syncPut(SyncPut)
     case syncPull(SyncPull)
     case syncPage(SyncPage)
@@ -2903,6 +3052,11 @@ public enum AnyMessage: Codable, Sendable {
         case .pairResult: return "pair.result"
         case .pairCodeClaim: return "pair.code.claim"
         case .pairOfferMsg: return "pair.offer"
+        case .pairRemoved: return "pair.removed"
+        case .devicesList: return "devices.list"
+        case .devicesPage: return "devices.page"
+        case .deviceRename: return "device.rename"
+        case .deviceUnpair: return "device.unpair"
         case .syncPut: return "sync.put"
         case .syncPull: return "sync.pull"
         case .syncPage: return "sync.page"
@@ -2981,6 +3135,11 @@ public enum AnyMessage: Codable, Sendable {
         case "pair.result": self = .pairResult(try c.decode(PairResult.self))
         case "pair.code.claim": self = .pairCodeClaim(try c.decode(PairCodeClaim.self))
         case "pair.offer": self = .pairOfferMsg(try c.decode(PairOfferMsg.self))
+        case "pair.removed": self = .pairRemoved(try c.decode(PairRemoved.self))
+        case "devices.list": self = .devicesList(try c.decode(DevicesList.self))
+        case "devices.page": self = .devicesPage(try c.decode(DevicesPage.self))
+        case "device.rename": self = .deviceRename(try c.decode(DeviceRename.self))
+        case "device.unpair": self = .deviceUnpair(try c.decode(DeviceUnpair.self))
         case "sync.put": self = .syncPut(try c.decode(SyncPut.self))
         case "sync.pull": self = .syncPull(try c.decode(SyncPull.self))
         case "sync.page": self = .syncPage(try c.decode(SyncPage.self))
@@ -3060,6 +3219,11 @@ public enum AnyMessage: Codable, Sendable {
         case .pairResult(let v): try c.encode(v)
         case .pairCodeClaim(let v): try c.encode(v)
         case .pairOfferMsg(let v): try c.encode(v)
+        case .pairRemoved(let v): try c.encode(v)
+        case .devicesList(let v): try c.encode(v)
+        case .devicesPage(let v): try c.encode(v)
+        case .deviceRename(let v): try c.encode(v)
+        case .deviceUnpair(let v): try c.encode(v)
         case .syncPut(let v): try c.encode(v)
         case .syncPull(let v): try c.encode(v)
         case .syncPage(let v): try c.encode(v)

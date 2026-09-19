@@ -193,12 +193,104 @@ describe("hub 单机模式", () => {
     expect(u.summary.usd).toBeCloseTo(0.017, 6);
     expect(u.summary.inputTokens).toBe(1300);
     const d = (await (await fetch(`${http}/api/devices`, { headers: { authorization: `Bearer ${mac.sessionToken}` } })).json()) as { devices: { deviceId: string; online: boolean; paired: boolean }[] };
-    const me = d.devices.find((x) => x.deviceId === mac.id)!;
-    expect(me.online).toBe(true);
+    // 列表是「别的端」，不含自己
+    expect(d.devices.some((x) => x.deviceId === mac.id)).toBe(false);
     const mac1 = d.devices.find((x) => x.deviceId === "mac-1")!;
     expect(mac1.online).toBe(false);
     expect(mac1.paired).toBe(false);
+    expect(d.devices.find((x) => x.deviceId === "phone-1")).toMatchObject({ paired: false, online: false });
     mac.close();
+  });
+  test("多设备：一部手机管两台 Mac，各走各的通道；devices.list / 别名 / 解绑", async () => {
+    const phone = await Endpoint.make("phone-m", "phone", "Ed25519");
+    const a = await Endpoint.make("mac-work", "device");
+    const b = await Endpoint.make("mac-home", "device");
+    const c = await Endpoint.make("mac-other", "device");
+    await Promise.all([phone.login(url), a.login(url, { name: "工作 Mac" }), b.login(url, { name: "家里 Mac" }), c.login(url, { name: "别人的 Mac" })]);
+    const secret = b64(crypto.getRandomValues(new Uint8Array(16)));
+    const dbg = (e: Endpoint) => e.inbox.map((m) => ("bin" in m ? "bin" : m.type === "error" ? `error:${m.code}:${m.message}` : m.type));
+    const r1 = await pair(phone, a, secret).catch((e) => { throw new Error(`pair a: ${e.message} phone=${dbg(phone)} a=${dbg(a)}`); });
+    expect(r1.rp.ok).toBe(true);
+    const r2 = await pair(phone, b, secret).catch((e) => { throw new Error(`pair b: ${e.message} phone=${dbg(phone)} b=${dbg(b)}`); });
+    expect(r2.rp.ok).toBe(true);
+    // 配对后各自收到对端公钥
+    const kA = await phone.expect("peer.keys", (m) => m.deviceId === a.id);
+    const kB = await phone.expect("peer.keys", (m) => m.deviceId === b.id);
+    const kPa = await a.expect("peer.keys");
+    const kPb = await b.expect("peer.keys");
+
+    // 手机对两台各建一条端到端链路，密文只到该去的那台
+    const mk = async (peer: Endpoint, peerKem: string) => E2ELink.create({ selfId: phone.id, self: phone.kem, peerId: peer.id, peerPublicKey: new Uint8Array(Buffer.from(peerKem, "base64")) });
+    const pa = await mk(a, kA.pubKeys.kem);
+    const pb = await mk(b, kB.pubKeys.kem);
+    const la = await E2ELink.create({ selfId: a.id, self: a.kem, peerId: phone.id, peerPublicKey: new Uint8Array(Buffer.from(kPa.pubKeys.kem, "base64")) });
+    const lb = await E2ELink.create({ selfId: b.id, self: b.kem, peerId: phone.id, peerPublicKey: new Uint8Array(Buffer.from(kPb.pubKeys.kem, "base64")) });
+    phone.sendBin(pa.handshake());
+    expect(await la.openRelay(await a.expectBin())).toBeNull();
+    a.sendBin(la.handshake());
+    expect(await pa.openRelay(await phone.expectBin())).toBeNull();
+    phone.sendBin(pb.handshake());
+    expect(await lb.openRelay(await b.expectBin())).toBeNull();
+    b.sendBin(lb.handshake());
+    expect(await pb.openRelay(await phone.expectBin())).toBeNull();
+
+    const toA = mkMsg({ type: "intent.submit", text: "给 A 的", deviceId: a.id, mode: "agent" });
+    const toB = mkMsg({ type: "intent.submit", text: "给 B 的", deviceId: b.id, mode: "agent" });
+    phone.sendBin(await pa.sealFrame(controlFrame(toA, 0)));
+    phone.sendBin(await pb.sealFrame(controlFrame(toB, 0)));
+    expect(parseControl(decodeFrame((await la.openRelay(await a.expectBin()))!))).toEqual(toA);
+    expect(parseControl(decodeFrame((await lb.openRelay(await b.expectBin()))!))).toEqual(toB);
+    expect(a.inbox.filter((m) => "bin" in m)).toHaveLength(0);
+    expect(b.inbox.filter((m) => "bin" in m)).toHaveLength(0);
+    // A 和 B 之间没配对，互相发不了
+    const lab = await E2ELink.create({ selfId: a.id, self: a.kem, peerId: b.id, peerPublicKey: new Uint8Array(Buffer.from(b.pubKeys.kem, "base64")) });
+    a.sendBin(lab.handshake());
+    expect((await a.expect("error")).code).toBe("not_paired");
+
+    // devices.list：A、B 配过对且在线，C 同账号但没配对
+    phone.send({ type: "devices.list" });
+    let page = await phone.expect("devices.page");
+    expect(page.devices.map((d) => [d.deviceId, d.paired, d.online, d.name])).toEqual([
+      ["mac-home", true, true, "家里 Mac"],
+      ["mac-work", true, true, "工作 Mac"],
+      ...page.devices.filter((d) => !d.paired).map((d) => [d.deviceId, false, d.online, d.name]),
+    ]);
+    expect(page.devices.find((d) => d.deviceId === c.id)).toMatchObject({ paired: false, online: true, name: "别人的 Mac" });
+    expect(page.devices.some((d) => d.deviceId === phone.id)).toBe(false);
+    expect(page.devices.find((d) => d.deviceId === a.id)!.pairedAt).toBe(now);
+
+    // 别名：只能给自己或配过对的起；不影响设备自报名
+    phone.send({ type: "device.rename", deviceId: c.id, name: "偷改" });
+    expect((await phone.expect("error")).code).toBe("not_paired");
+    phone.send({ type: "device.rename", deviceId: a.id, name: "  公司 M5  " });
+    await phone.expect("ack");
+    phone.send({ type: "devices.list" });
+    page = await phone.expect("devices.page");
+    expect(page.devices.find((d) => d.deviceId === a.id)!.name).toBe("公司 M5");
+    expect(srv.hub.store.getDevice(a.id)!.name).toBe("工作 Mac");
+
+    // 解绑 B：双方收到 pair.removed；之后手机→B 报 not_paired；列表里 B 变成未配对
+    phone.send({ type: "device.unpair", deviceId: b.id });
+    await phone.expect("ack");
+    expect(await phone.expect("pair.removed")).toMatchObject({ deviceId: b.id, phoneId: phone.id, by: phone.id });
+    expect(await b.expect("pair.removed")).toMatchObject({ deviceId: b.id, phoneId: phone.id, by: phone.id });
+    phone.sendBin(await pb.sealFrame(controlFrame(toB, 0)));
+    expect((await phone.expect("error")).code).toBe("not_paired");
+    phone.sendBin(await pa.sealFrame(controlFrame(toA, 0)));
+    expect(parseControl(decodeFrame((await la.openRelay(await a.expectBin()))!))).toEqual(toA);
+    phone.send({ type: "devices.list" });
+    page = await phone.expect("devices.page");
+    expect(page.devices.find((d) => d.deviceId === b.id)).toMatchObject({ paired: false, online: true });
+    expect(page.devices[0]!.deviceId).toBe(a.id);
+
+    // B 掉线后 lastSeen 停在下线时刻
+    b.close();
+    await new Promise((r) => setTimeout(r, 50));
+    now += 100;
+    phone.send({ type: "devices.list" });
+    page = await phone.expect("devices.page");
+    expect(page.devices.find((d) => d.deviceId === b.id)).toMatchObject({ online: false, lastSeen: now - 100 });
+    for (const e of [phone, a, c]) e.close();
   });
 });
 

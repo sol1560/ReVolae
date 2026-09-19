@@ -92,6 +92,17 @@ Mac `cuaremote pair` 打印 `PairOffer` 二维码（JSON）。手机扫码后：
 
 HTTP 接口都用 `Authorization: Bearer <sessionToken>`：`POST /api/pair/code`、`GET /api/devices`、`GET /api/usage`、`DELETE /api/pairings?peer=`；`GET /healthz` 免鉴权。
 
+### 多设备管理
+
+一部手机可以和任意多台被控设备配对（每对一条 pairings 记录，中继按对放行；免费层由计费限制台数）。同一部手机对不同设备各建一条端到端链路，密文只到 `to` 指的那台。控制端管理这些设备用的消息（WebSocket，和 HTTP 同源）：
+
+| 消息 | 方向 | 说明 |
+|---|---|---|
+| `devices.list{}` → `devices.page{devices:[DeviceSummary]}` | 端 → hub | 我配过对的对端 ∪ 同账号下其它端，去掉自己和大脑；`paired=false` 的可以发起配对。`name` 优先本账号起的别名；在线的 `lastSeen` 是现在，离线的是下线时刻。排序：配过对 > 在线 > 名字。`GET /api/devices` 返回同一份 |
+| `device.rename{deviceId, name}` → `ack` | 端 → hub | 给自己或配过对的对端起别名（1–64 字，去首尾空白），存 `device_aliases(account_id, device_id)`，只在本账号内可见，不改设备自报的 `hello.name`。没配过对回 `not_paired` |
+| `device.unpair{deviceId}` → `ack` | 端 → hub | 解绑（等价 `DELETE /api/pairings?peer=`）。两个方向的配对都删，之后中继回 `not_paired` |
+| `pair.removed{deviceId, phoneId, by}` | hub → 双方 | 解绑通知，在线的一方立刻收到；离线的一方下次登录时 `announce` 里自然没有这个对端。`by` 是发起解绑的 id |
+
 ## 云端大脑
 
 hub 设了 `HUB_CLOUD_BRAIN_PROVIDER=<provider:model>` 时，每个账号在第一个端登录时会挂上一个进程内的虚拟端点 `brain:<accountId>`（role `brain`，platform `cloud`）。它不走 WebSocket 也不走 hello/auth，但在 hub 眼里和别的端一样：有 devices 表记录、有 presence、发信封同样受 `from`/`canTalk` 校验。它的长期密钥存在 `brain_keys` 表（X25519 种子 + Ed25519 签名密钥），hub 重启后 id 和公钥不变，手机固定过的公钥不会失效。

@@ -81,7 +81,7 @@ export class Endpoint {
     return new Promise<HubMessage | { bin: Uint8Array }>((resolve, reject) => {
       const t = setTimeout(() => {
         this.waiters = this.waiters.filter((w) => w.resolve !== ok);
-        reject(new Error(`等消息超时；收件箱里有 ${JSON.stringify(this.inbox.map((m) => ("bin" in m ? "bin" : m.type)))}`));
+        reject(new Error(`等消息超时；收件箱里有 ${JSON.stringify(this.inbox.map((m) => ("bin" in m ? "bin" : m.type === "error" ? `error:${m.code}:${m.message}` : m.type)))}`));
       }, timeoutMs);
       const ok = (m: any) => {
         clearTimeout(t);

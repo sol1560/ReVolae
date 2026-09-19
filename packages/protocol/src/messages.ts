@@ -268,6 +268,29 @@ export const PairResult = msg("pair.result", { deviceId: z.string(), phoneId: z.
 /** 无摄像头时的 6 位码撮合：手机拿 code 换 PairOffer，之后照常走 pair.request */
 export const PairCodeClaim = msg("pair.code.claim", { code: z.string().length(6), phoneId: z.string(), phonePubKeys: PublicKeys });
 export const PairOfferMsg = msg("pair.offer", PairOffer.shape);
+/** 任一方解绑（device.unpair 或 DELETE /api/pairings）后 hub 通知双方 */
+export const PairRemoved = msg("pair.removed", { deviceId: z.string(), phoneId: z.string(), by: z.string() });
+
+// 多设备管理（端 ↔ hub）
+/** 一条设备记录：我配过对的对端 + 同账号下其它端（paired=false 时可以发起配对） */
+export const DeviceSummary = z.object({
+  deviceId: z.string(),
+  role: z.enum(["device", "phone"]),
+  platform: DevicePlatform,
+  /** 显示名：账号内起过别名就是别名，否则是设备自报的名字 */
+  name: z.string(),
+  online: z.boolean(),
+  lastSeen: z.number().int(),
+  paired: z.boolean(),
+  pairedAt: z.number().int().optional(),
+});
+export type DeviceSummary = z.infer<typeof DeviceSummary>;
+export const DevicesList = msg("devices.list", {});
+export const DevicesPage = msg("devices.page", { devices: z.array(DeviceSummary) });
+/** 给自己或配过对的对端起别名（只在本账号内可见，不影响设备自报的名字） */
+export const DeviceRename = msg("device.rename", { deviceId: z.string(), name: z.string().trim().min(1).max(64) });
+/** 和某个对端解绑；双方都会收到 pair.removed */
+export const DeviceUnpair = msg("device.unpair", { deviceId: z.string() });
 
 // ─────────────────────────── 大脑 ↔ 宿主 ───────────────────────────
 
@@ -305,7 +328,8 @@ export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
 export const HubMessage = z.discriminatedUnion("type", [
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus, ErrorMsg, Ack,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, PairRemoved, DevicesList, DevicesPage, DeviceRename, DeviceUnpair,
+  SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus, ErrorMsg, Ack,
 ]);
 export type HubMessage = z.infer<typeof HubMessage>;
 
@@ -332,7 +356,8 @@ export const AllMessages = {
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, PairRemoved, DevicesList, DevicesPage, DeviceRename, DeviceUnpair,
+  SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus,
   ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,
 } as const;
 
