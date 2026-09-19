@@ -657,6 +657,46 @@ public struct Shortcut: Codable, Sendable {
     }
 }
 
+public enum SyncKind: String, Codable, Sendable, CaseIterable {
+    case history = "history"
+    case shortcuts = "shortcuts"
+    case logs = "logs"
+    case screenshots = "screenshots"
+}
+
+public struct SyncBlob: Codable, Sendable {
+    public var kind: SyncKind
+    public var id: String
+    public var deviceId: String
+    public var ts: Int
+    public var keyId: String
+    public var alg: String
+    public var nonce: String
+    public var ct: String
+
+    public init(kind: SyncKind, id: String, deviceId: String, ts: Int, keyId: String, alg: String, nonce: String, ct: String) {
+        self.kind = kind
+        self.id = id
+        self.deviceId = deviceId
+        self.ts = ts
+        self.keyId = keyId
+        self.alg = alg
+        self.nonce = nonce
+        self.ct = ct
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case id
+        case deviceId
+        case ts
+        case keyId
+        case alg
+        case nonce
+        case ct
+    }
+}
+
 public enum ToolDescriptorCostClass: Int, Codable, Sendable, CaseIterable, Comparable {
     case l0 = 0
     case l1 = 1
@@ -1213,6 +1253,29 @@ public struct ModelsList: Codable, Sendable {
         case v
         case id
         case `type`
+    }
+}
+
+public struct SyncKey: Codable, Sendable {
+    public static let messageType = "sync.key"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "sync.key"
+    public var keyId: String
+    public var key: String
+
+    public init(id: String, keyId: String, key: String) {
+        self.id = id
+        self.keyId = keyId
+        self.key = key
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case keyId
+        case key
     }
 }
 
@@ -2252,6 +2315,104 @@ public struct PairOfferMsg: Codable, Sendable {
     }
 }
 
+public struct SyncPut: Codable, Sendable {
+    public static let messageType = "sync.put"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "sync.put"
+    public var items: [SyncBlob]
+
+    public init(id: String, items: [SyncBlob]) {
+        self.id = id
+        self.items = items
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case items
+    }
+}
+
+public struct SyncPull: Codable, Sendable {
+    public static let messageType = "sync.pull"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "sync.pull"
+    public var kind: SyncKind
+    public var cursor: String?
+    public var limit: Int?
+
+    public init(id: String, kind: SyncKind, cursor: String? = nil, limit: Int? = nil) {
+        self.id = id
+        self.kind = kind
+        self.cursor = cursor
+        self.limit = limit
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case kind
+        case cursor
+        case limit
+    }
+}
+
+public struct SyncPage: Codable, Sendable {
+    public static let messageType = "sync.page"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "sync.page"
+    public var kind: SyncKind
+    public var items: [SyncBlob]
+    public var cursor: String?
+    public var more: Bool
+
+    public init(id: String, kind: SyncKind, items: [SyncBlob], cursor: String? = nil, more: Bool) {
+        self.id = id
+        self.kind = kind
+        self.items = items
+        self.cursor = cursor
+        self.more = more
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case kind
+        case items
+        case cursor
+        case more
+    }
+}
+
+public struct SyncDelete: Codable, Sendable {
+    public static let messageType = "sync.delete"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "sync.delete"
+    public var kind: SyncKind
+    public var ids: [String]?
+
+    public init(id: String, kind: SyncKind, ids: [String]? = nil) {
+        self.id = id
+        self.kind = kind
+        self.ids = ids
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case kind
+        case ids
+    }
+}
+
 public struct ToolsList: Codable, Sendable {
     public static let messageType = "tools.list"
     public var v: Int = 1
@@ -2498,6 +2659,7 @@ public enum AnyMessage: Codable, Sendable {
     case appCardsGet(AppCardsGet)
     case capabilitiesGet(CapabilitiesGet)
     case modelsList(ModelsList)
+    case syncKey(SyncKey)
     case runCreated(RunCreated)
     case planUpdated(PlanUpdated)
     case stepStarted(StepStarted)
@@ -2533,6 +2695,10 @@ public enum AnyMessage: Codable, Sendable {
     case pairResult(PairResult)
     case pairCodeClaim(PairCodeClaim)
     case pairOfferMsg(PairOfferMsg)
+    case syncPut(SyncPut)
+    case syncPull(SyncPull)
+    case syncPage(SyncPage)
+    case syncDelete(SyncDelete)
     case toolsList(ToolsList)
     case toolsListResult(ToolsListResult)
     case toolsCall(ToolsCall)
@@ -2566,6 +2732,7 @@ public enum AnyMessage: Codable, Sendable {
         case .appCardsGet: return "app.cards.get"
         case .capabilitiesGet: return "capabilities.get"
         case .modelsList: return "models.list"
+        case .syncKey: return "sync.key"
         case .runCreated: return "run.created"
         case .planUpdated: return "plan.updated"
         case .stepStarted: return "step.started"
@@ -2601,6 +2768,10 @@ public enum AnyMessage: Codable, Sendable {
         case .pairResult: return "pair.result"
         case .pairCodeClaim: return "pair.code.claim"
         case .pairOfferMsg: return "pair.offer"
+        case .syncPut: return "sync.put"
+        case .syncPull: return "sync.pull"
+        case .syncPage: return "sync.page"
+        case .syncDelete: return "sync.delete"
         case .toolsList: return "tools.list"
         case .toolsListResult: return "tools.list.result"
         case .toolsCall: return "tools.call"
@@ -2636,6 +2807,7 @@ public enum AnyMessage: Codable, Sendable {
         case "app.cards.get": self = .appCardsGet(try c.decode(AppCardsGet.self))
         case "capabilities.get": self = .capabilitiesGet(try c.decode(CapabilitiesGet.self))
         case "models.list": self = .modelsList(try c.decode(ModelsList.self))
+        case "sync.key": self = .syncKey(try c.decode(SyncKey.self))
         case "run.created": self = .runCreated(try c.decode(RunCreated.self))
         case "plan.updated": self = .planUpdated(try c.decode(PlanUpdated.self))
         case "step.started": self = .stepStarted(try c.decode(StepStarted.self))
@@ -2671,6 +2843,10 @@ public enum AnyMessage: Codable, Sendable {
         case "pair.result": self = .pairResult(try c.decode(PairResult.self))
         case "pair.code.claim": self = .pairCodeClaim(try c.decode(PairCodeClaim.self))
         case "pair.offer": self = .pairOfferMsg(try c.decode(PairOfferMsg.self))
+        case "sync.put": self = .syncPut(try c.decode(SyncPut.self))
+        case "sync.pull": self = .syncPull(try c.decode(SyncPull.self))
+        case "sync.page": self = .syncPage(try c.decode(SyncPage.self))
+        case "sync.delete": self = .syncDelete(try c.decode(SyncDelete.self))
         case "tools.list": self = .toolsList(try c.decode(ToolsList.self))
         case "tools.list.result": self = .toolsListResult(try c.decode(ToolsListResult.self))
         case "tools.call": self = .toolsCall(try c.decode(ToolsCall.self))
@@ -2707,6 +2883,7 @@ public enum AnyMessage: Codable, Sendable {
         case .appCardsGet(let v): try c.encode(v)
         case .capabilitiesGet(let v): try c.encode(v)
         case .modelsList(let v): try c.encode(v)
+        case .syncKey(let v): try c.encode(v)
         case .runCreated(let v): try c.encode(v)
         case .planUpdated(let v): try c.encode(v)
         case .stepStarted(let v): try c.encode(v)
@@ -2742,6 +2919,10 @@ public enum AnyMessage: Codable, Sendable {
         case .pairResult(let v): try c.encode(v)
         case .pairCodeClaim(let v): try c.encode(v)
         case .pairOfferMsg(let v): try c.encode(v)
+        case .syncPut(let v): try c.encode(v)
+        case .syncPull(let v): try c.encode(v)
+        case .syncPage(let v): try c.encode(v)
+        case .syncDelete(let v): try c.encode(v)
         case .toolsList(let v): try c.encode(v)
         case .toolsListResult(let v): try c.encode(v)
         case .toolsCall(let v): try c.encode(v)

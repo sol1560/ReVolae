@@ -19,3 +19,4 @@ export { learnApp, runCard, fetchCard, INVENTORY_TOOL, CARD_GET_TOOL, type Learn
 export { validateCards, renderTemplate, escapeFor, toolArgs, placeholders, CARD_TOOL, PROPOSE_CARDS_TOOL, ProposedCard } from "./learn/cards.js";
 export { IpadHost, IPAD_TOOLS, IPAD_DEVICE_TOOLS, hasIpadTools, wrapIfIpad, CALIBRATION_MAGNITUDES } from "./ipad/ipad-host.js";
 export { listModels, probeLocal, resolveProvider, tierAccepts, catalogMessage, BUILTIN_MODELS } from "./llm/catalog.js";
+export { HistorySync, type HistoryStore, type HistorySyncState, type HistorySyncDeps, type PushResult, type PullResult } from "./sync/history-sync.js";

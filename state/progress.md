@@ -31,7 +31,8 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 ## M3 - 产品化 [RUNNING]
 - F3.1 语音（runner B）[PENDING]
 - F3.2 模型设置页 [DONE-orb 部分] 协议：PrivacySettings.cloudModel、ModelEntry、models.list / models.catalog；brain：packages/brain/src/llm/catalog.ts（BUILTIN_MODELS、listModels、probeLocal、tierAccepts、resolveProvider 选错抛错不降级、catalogMessage）；providers.ts 补 ANTHROPIC_ZDR / ZENMUX_ZDR；host-mode 与云端大脑的 intent/learn 都改走 resolveProvider 并响应 models.list；docs/protocol.md「模型设置」节；15 测试。设置页 UI 归 runner B
-- F3.3 密文同步 · F3.4 实时画面 · F3.5 OSC 133 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]
+- F3.3 密文同步 [DONE-orb 部分] 协议：SyncKind/SyncBlob、sync.put/pull/page/delete（端↔hub）、sync.key（端到端分发密钥）；packages/protocol/src/sync.ts AES-256-GCM sealSync/openSync（AAD 绑 kind|id|deviceId|ts，5 测试）；hub：sync_blobs 表、按 ts 覆盖、seq 游标分页、unclaimed 拒、单块 64 KiB、每类 5000 配额只算新 id（2 端到端测试）；brain：packages/brain/src/sync/history-sync.ts HistorySync push/pull/disable/setKey（4 测试）；docs「云同步」节。Swift/Kotlin 端移植归 runner
+- F3.4 实时画面 · F3.5 OSC 133 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]
 
 ## M4 - Android [RUNNING]
 - F4.1 adb 工具 [PENDING]

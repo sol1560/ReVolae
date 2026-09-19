@@ -17,6 +17,8 @@ import {
   PublicKeys,
   Scope,
   Shortcut,
+  SyncBlob,
+  SyncKind,
   ToolDescriptor,
   Verdict,
 } from "./common.js";
@@ -206,6 +208,18 @@ export const PushRegister = msg("push.register", { platform: z.enum(["apns", "fc
 export const PushSend = msg("push.send", { to: z.string(), sealed: z.string(), category: z.string() });
 export const UsageReport = msg("usage.report", { runId: z.string(), cost: Cost, steps: z.number().int(), jevCalls: z.number().int() });
 
+// 云同步（端 ↔ hub，密文块；hub 不解密）
+/** 上传/覆盖若干块，同 (kind,id) 以 ts 新的为准 */
+export const SyncPut = msg("sync.put", { items: z.array(SyncBlob).min(1).max(100) });
+/** 按 kind 增量拉取，cursor 是上一页 sync.page 的 cursor（hub 内部序号），从头拉不填 */
+export const SyncPull = msg("sync.pull", { kind: SyncKind, cursor: z.string().optional(), limit: z.number().int().positive().max(200).default(100) });
+/** cursor = 这一页最后一条的序号，下次从这里接着拉（这页没条目时不带）；more = 后面还有 */
+export const SyncPage = msg("sync.page", { kind: SyncKind, items: z.array(SyncBlob), cursor: z.string().optional(), more: z.boolean() });
+/** 删指定 id；不带 ids = 把这个账号这一类全部抹掉（关掉同步开关时用） */
+export const SyncDelete = msg("sync.delete", { kind: SyncKind, ids: z.array(z.string()).max(500).optional() });
+/** 端到端分发同步密钥（手机 ↔ 设备，走加密链路；hub 永远见不到） */
+export const SyncKey = msg("sync.key", { keyId: z.string().min(1).max(64), /** base64 32 字节 */ key: z.string() });
+
 // 配对
 export const PairOffer = z.object({
   hubURL: z.string().url(),
@@ -254,20 +268,20 @@ export const ApprovalResponse = msg("approval.response", { runId: z.string(), st
 export const PhoneToDevice = z.discriminatedUnion("type", [
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
-  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
 ]);
 export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
 
 export const DeviceToPhone = z.discriminatedUnion("type", [
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, MediaInfo, Stats, Capabilities, PrivacyState,
-  HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
+  HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, SyncKey, ErrorMsg, Ack,
 ]);
 export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
 export const HubMessage = z.discriminatedUnion("type", [
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, ErrorMsg, Ack,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, ErrorMsg, Ack,
 ]);
 export type HubMessage = z.infer<typeof HubMessage>;
 
@@ -279,7 +293,8 @@ export type BrainHostMessage = z.infer<typeof BrainHostMessage>;
 /** 端到端（解密后）帧里 kind=0 的所有控制消息 */
 const peerList = [
   ...PhoneToDevice.options,
-  ...DeviceToPhone.options.filter((o) => !["terminal.ack", "error", "ack"].includes(o.shape.type.value)),
+  // 两个方向都有的（sync.key、error、ack、terminal.ack）只留一份
+  ...DeviceToPhone.options.filter((o) => !["terminal.ack", "error", "ack", "sync.key"].includes(o.shape.type.value)),
 ];
 export const PeerMessage = z.discriminatedUnion("type", [peerList[0]!, ...peerList.slice(1)] as [(typeof peerList)[number], ...(typeof peerList)[number][]]);
 export type PeerMessage = z.infer<typeof PeerMessage>;
@@ -288,12 +303,12 @@ export type PeerMessage = z.infer<typeof PeerMessage>;
 export const AllMessages = {
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
-  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete,
   ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,
 } as const;
 

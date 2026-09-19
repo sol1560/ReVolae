@@ -251,6 +251,32 @@ export const HistoryItem = z.object({
 });
 export type HistoryItem = z.infer<typeof HistoryItem>;
 
+/** 云同步的数据种类，对应 SyncSettings 里的四个开关 */
+export const SyncKind = z.enum(["history", "shortcuts", "logs", "screenshots"]);
+export type SyncKind = z.infer<typeof SyncKind>;
+
+/**
+ * 云同步的一块密文。hub 只看得到这些字段，看不到内容。
+ * id 在同一账号同一 kind 内唯一（history 用 runId）；ts 用来排序和「新的覆盖旧的」；
+ * nonce / ct 是 AES-256-GCM 的随机数和密文（含 tag），AAD = `${kind}|${id}|${deviceId}|${ts}`，
+ * 所以 hub 改任何一个明文字段都会让解密失败。
+ */
+export const SyncBlob = z.object({
+  kind: SyncKind,
+  id: z.string().min(1).max(200),
+  /** 产生这条数据的设备（被控端或手机） */
+  deviceId: z.string(),
+  ts: z.number().int(),
+  /** 用哪把同步密钥加的（轮换用） */
+  keyId: z.string().min(1).max(64),
+  alg: z.literal("aes-256-gcm"),
+  /** base64，12 字节 */
+  nonce: z.string(),
+  /** base64，明文 JSON 的密文 + 16 字节 tag；单块 ≤ 64 KiB（base64 前） */
+  ct: z.string(),
+});
+export type SyncBlob = z.infer<typeof SyncBlob>;
+
 export const DeviceStats = z.object({
   batteryPercent: z.number().optional(),
   charging: z.boolean().optional(),

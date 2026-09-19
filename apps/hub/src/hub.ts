@@ -22,6 +22,7 @@ import {
   verifySignedPayload,
   type MsgBody,
   type PublicKeys,
+  type SyncKind,
 } from "@cuaremote/protocol";
 import { newNonce, newPairCode, newSessionToken, verifyJwt } from "./auth.js";
 import { HubStore, type DeviceRow, type Role } from "./db.js";
@@ -56,6 +57,8 @@ export interface HubOptions {
   sessionTtlSec?: number;
   pairCodeTtlSec?: number;
   log?: (line: string) => void;
+  /** 每个账号每类云同步密文块的条数上限（默认 5000） */
+  syncQuotaPerKind?: number;
   /** 某个端登录成功 / 掉线（云端大脑管理器靠这个按账号起大脑、清理掉线设备） */
   onPresence?: (ev: { deviceId: string; role: Role; accountId: string; platform: string; online: boolean }) => void;
 }
@@ -75,6 +78,9 @@ export interface AttachedEndpoint {
 }
 
 const UNCLAIMED = "unclaimed";
+/** 64 KiB 明文 + 16 字节 tag 转 base64 后的长度上限 */
+const SYNC_CT_MAX_B64 = Math.ceil((64 * 1024 + 16) / 3) * 4;
+const SYNC_QUOTA_PER_KIND = 5000;
 const LOCAL = "local";
 
 export class Hub {
@@ -230,12 +236,27 @@ export class Hub {
         return this.onPairConfirm(s, m);
       case "pair.code.claim":
         return this.onPairCodeClaim(s, m);
+      case "sync.put":
+        return this.onSyncPut(s, m);
+      case "sync.pull": {
+        if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号再同步", m.id);
+        const after = m.cursor ? Number(m.cursor) : 0;
+        if (!Number.isFinite(after) || after < 0) return this.fail(s, "bad_cursor", "cursor 不合法", m.id);
+        const page = this.store.pullSyncBlobs(s.accountId!, m.kind, after, m.limit);
+        return this.reply(s, { type: "sync.page", kind: m.kind, items: page.items, more: page.more, ...(page.cursor ? { cursor: page.cursor } : {}) });
+      }
+      case "sync.delete": {
+        if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号再同步", m.id);
+        this.store.deleteSyncBlobs(s.accountId!, m.kind, m.ids);
+        return this.reply(s, { type: "ack", ref: m.id });
+      }
       case "presence":
       case "peer.keys":
       case "auth.challenge":
       case "auth.ok":
       case "pair.result":
       case "pair.offer":
+      case "sync.page":
         return this.fail(s, "not_allowed", `${m.type} 只能由 hub 发出`, m.id);
       case "error":
       case "ack":
@@ -467,6 +488,21 @@ export class Hub {
   }
 
   // ───────────────────────── 工具 ─────────────────────────
+
+  /** 云同步上传：只收登录账号的端；单块 ≤ 64 KiB（base64 后放宽到 96 KiB）；每类每账号有上限 */
+  private onSyncPut(s: Session, m: Extract<HubMessage, { type: "sync.put" }>) {
+    if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号再同步", m.id);
+    const tooBig = m.items.find((b) => b.ct.length > SYNC_CT_MAX_B64);
+    if (tooBig) return this.fail(s, "sync_too_big", `同步块 ${tooBig.kind}/${tooBig.id} 超过单块上限`, m.id);
+    const byKind = new Map<SyncKind, Set<string>>();
+    for (const b of m.items) (byKind.get(b.kind) ?? byKind.set(b.kind, new Set()).get(b.kind)!).add(b.id);
+    for (const [kind, ids] of byKind) {
+      const fresh = ids.size - this.store.existingSyncIds(s.accountId!, kind, [...ids]).size;
+      if (this.store.countSyncBlobs(s.accountId!, kind) + fresh > (this.o.syncQuotaPerKind ?? SYNC_QUOTA_PER_KIND)) return this.fail(s, "sync_quota", `${kind} 同步条数已到上限，先删一些或关掉这一类同步`, m.id);
+    }
+    this.store.putSyncBlobs(s.accountId!, m.items, this.now());
+    return this.reply(s, { type: "ack", ref: m.id });
+  }
 
   private reply(s: Session, body: MsgBody) {
     s.conn.send(JSON.stringify(mkMsg(body)));

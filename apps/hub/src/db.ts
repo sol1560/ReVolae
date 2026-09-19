@@ -2,9 +2,10 @@
  * hub 的持久层：bun:sqlite。
  * 只存「路由需要知道的」：谁是谁（公钥）、谁和谁配过对、推送 token、用量。
  * 端到端密文一律不落库（推送 outbox 里的 sealed 是给手机 HPKE 公钥封好的，hub 解不开）。
+ * 例外是用户主动开的云同步：sync_blobs 存的是 AES-GCM 密文块，密钥只在用户的端上。
  */
 import { Database } from "bun:sqlite";
-import type { Cost, PairOffer, PublicKeys } from "@cuaremote/protocol";
+import type { Cost, PairOffer, PublicKeys, SyncBlob, SyncKind } from "@cuaremote/protocol";
 
 export type Role = "device" | "phone" | "brain";
 
@@ -105,6 +106,20 @@ CREATE TABLE IF NOT EXISTS usage (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS usage_account_at ON usage(account_id, at);
+CREATE TABLE IF NOT EXISTS sync_blobs (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  key_id TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  ct TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(account_id, kind, id)
+);
+CREATE INDEX IF NOT EXISTS sync_blobs_account_kind_seq ON sync_blobs(account_id, kind, seq);
 CREATE TABLE IF NOT EXISTS brain_keys (
   account_id TEXT PRIMARY KEY,
   kem_seed TEXT NOT NULL,
@@ -276,6 +291,72 @@ export class HubStore {
     this.db
       .query("INSERT OR IGNORE INTO brain_keys (account_id, kem_seed, sig_priv, sig_pub, sig_alg, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(k.accountId, k.kemSeed, k.sigPriv, k.sigPub, k.sigAlg, k.createdAt);
+  }
+
+  // ── 云同步密文块（hub 只存不看） ──
+  /**
+   * 写入/覆盖：同 (account, kind, id) 只保留 ts 更新的那份（ts 相同也覆盖，允许重传）；旧于已有的一律忽略。
+   * 每次写入都拿新 seq，拉取方按 seq 增量拉就能拿到覆盖后的版本。返回真正写入的条数。
+   */
+  putSyncBlobs(accountId: string, items: SyncBlob[], now: number): number {
+    const existing = this.db.query<{ ts: number }, [string, string, string]>("SELECT ts FROM sync_blobs WHERE account_id = ? AND kind = ? AND id = ?");
+    const del = this.db.query("DELETE FROM sync_blobs WHERE account_id = ? AND kind = ? AND id = ?");
+    const ins = this.db.query("INSERT INTO sync_blobs (account_id, kind, id, device_id, ts, key_id, nonce, ct, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    let written = 0;
+    this.db.transaction(() => {
+      for (const b of items) {
+        const old = existing.get(accountId, b.kind, b.id);
+        if (old && old.ts > b.ts) continue;
+        if (old) del.run(accountId, b.kind, b.id);
+        ins.run(accountId, b.kind, b.id, b.deviceId, b.ts, b.keyId, b.nonce, b.ct, now);
+        written++;
+      }
+    })();
+    return written;
+  }
+
+  /** 按 seq 增量拉；cursor 是这页最后一条的 seq，more 表示后面还有 */
+  pullSyncBlobs(accountId: string, kind: SyncKind, afterSeq: number, limit: number): { items: SyncBlob[]; cursor?: string; more: boolean } {
+    const rows = this.db
+      .query<Record<string, unknown>, [string, string, number, number]>("SELECT * FROM sync_blobs WHERE account_id = ? AND kind = ? AND seq > ? ORDER BY seq ASC LIMIT ?")
+      .all(accountId, kind, afterSeq, limit + 1);
+    const more = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const items: SyncBlob[] = page.map((r) => ({
+      kind: r.kind as SyncKind,
+      id: r.id as string,
+      deviceId: r.device_id as string,
+      ts: r.ts as number,
+      keyId: r.key_id as string,
+      alg: "aes-256-gcm",
+      nonce: r.nonce as string,
+      ct: r.ct as string,
+    }));
+    const last = page.at(-1);
+    return { items, ...(last ? { cursor: String(last.seq) } : {}), more };
+  }
+
+  /** ids 省略 = 抹掉该账号这一类全部 */
+  deleteSyncBlobs(accountId: string, kind: SyncKind, ids?: string[]): number {
+    if (!ids) return this.db.query("DELETE FROM sync_blobs WHERE account_id = ? AND kind = ?").run(accountId, kind).changes;
+    const q = this.db.query("DELETE FROM sync_blobs WHERE account_id = ? AND kind = ? AND id = ?");
+    let n = 0;
+    this.db.transaction(() => {
+      for (const id of ids) n += q.run(accountId, kind, id).changes;
+    })();
+    return n;
+  }
+
+  /** 这些 id 里哪些已经存在（配额只算新 id） */
+  existingSyncIds(accountId: string, kind: SyncKind, ids: string[]): Set<string> {
+    const q = this.db.query<{ id: string }, [string, string, string]>("SELECT id FROM sync_blobs WHERE account_id = ? AND kind = ? AND id = ?");
+    const out = new Set<string>();
+    for (const id of ids) if (q.get(accountId, kind, id)) out.add(id);
+    return out;
+  }
+
+  countSyncBlobs(accountId: string, kind: SyncKind): number {
+    return this.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM sync_blobs WHERE account_id = ? AND kind = ?").get(accountId, kind)!.n;
   }
 
   listUsage(accountId: string, since: number): UsageRow[] {

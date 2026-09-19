@@ -831,6 +831,38 @@
         },
         "type": {
           "type": "string",
+          "const": "sync.key"
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "keyId",
+        "key"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "run.created"
         },
         "runId": {
@@ -3182,6 +3214,264 @@
         "pubKeys",
         "secret",
         "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "sync.put"
+        },
+        "items": {
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "history",
+                  "shortcuts",
+                  "logs",
+                  "screenshots"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "ts": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "keyId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "alg": {
+                "type": "string",
+                "const": "aes-256-gcm"
+              },
+              "nonce": {
+                "type": "string"
+              },
+              "ct": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "deviceId",
+              "ts",
+              "keyId",
+              "alg",
+              "nonce",
+              "ct"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "sync.pull"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "history",
+            "shortcuts",
+            "logs",
+            "screenshots"
+          ]
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 200
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "kind",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "sync.page"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "history",
+            "shortcuts",
+            "logs",
+            "screenshots"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "history",
+                  "shortcuts",
+                  "logs",
+                  "screenshots"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "deviceId": {
+                "type": "string"
+              },
+              "ts": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "keyId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "alg": {
+                "type": "string",
+                "const": "aes-256-gcm"
+              },
+              "nonce": {
+                "type": "string"
+              },
+              "ct": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "deviceId",
+              "ts",
+              "keyId",
+              "alg",
+              "nonce",
+              "ct"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "kind",
+        "items",
+        "more"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "sync.delete"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "history",
+            "shortcuts",
+            "logs",
+            "screenshots"
+          ]
+        },
+        "ids": {
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "kind"
       ],
       "additionalProperties": false
     },

@@ -5,3 +5,4 @@ export { z } from "zod";
 export * from "./hpke.js";
 export * from "./approval.js";
 export * from "./pairing.js";
+export * from "./sync.js";

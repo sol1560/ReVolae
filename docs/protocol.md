@@ -153,3 +153,18 @@ iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`�
 - `standard`：都收。
 
 选模型的顺序：`intent.submit.provider` → 档位对应的设置字段 → 大脑默认模型；每一步都要过档位检查。BYOK 的 key 建议只放本地大脑（Mac daemon 的环境变量），云端大脑不代管用户的 key。
+
+## 云同步（密文）
+
+默认什么都不上云。用户在隐私设置 `sync` 里逐项打开（`history` / `shortcuts` / `logs` / `screenshots`）才会同步，且 hub 只存密文块，解密密钥只在用户自己的端上。
+
+密钥：手机第一次打开任一同步开关时生成 `{keyId, key}`（32 字节），用 `sync.key{keyId, key}` 走端到端链路发给每台配过对的设备（也可反向由设备发给新手机）。hub 和云端大脑都见不到这条消息的内容。用户重新生成密钥（keyId 变了）= 之前上传的全部作废，端会整份重传。
+
+块格式 `SyncBlob`：`kind` / `id`（history 用 runId）/ `deviceId` / `ts` / `keyId` / `alg="aes-256-gcm"` / `nonce` / `ct`。AAD 绑定 `kind|id|deviceId|ts`，hub 改任何一个明文字段都解不开。单块明文 ≤ 64 KiB。实现见 `packages/protocol/src/sync.ts`（`sealSync` / `openSync`）。
+
+端 ↔ hub 的消息（明文 JSON 走 hub 连接，内容是密文）：
+- `sync.put{items}`：≤100 块。同 `(kind,id)` 以 `ts` 新的为准（相同也覆盖，允许重传），旧的忽略；每次写入拿新序号。只收已登录账号的端（unclaimed 设备回 `token_required`）；单块超限回 `sync_too_big`；每类每账号默认 5000 条（只算新 id，覆盖不占），超了整批拒 `sync_quota`。
+- `sync.pull{kind, cursor?, limit}` → `sync.page{kind, items, cursor?, more}`：按序号增量拉，`cursor` 是这页最后一条的序号，`more` 表示后面还有；从头拉不带 cursor。
+- `sync.delete{kind, ids?}`：删指定 id；不带 ids 抹掉该账号这一类全部（关掉开关时端要发这个）。没有墓碑：别的端已经拉走的本地副本不受影响。
+
+历史同步的端侧逻辑（参考实现 `packages/brain/src/sync/history-sync.ts`，Swift / Kotlin 照抄）：只传已结束的 run（有 `finishedAt`），本地 `finishedAt` 变新才重传；谁手里有明文谁传——本地大脑的 run 由设备传，云端大脑的 run 由手机传；拉取按游标增量、解不开的块跳过计数、合并时 `finishedAt` 大的赢、拉回来的不再回传；关掉开关 → `sync.delete` 整类 + 清空「已上传」记录。持久化 `{uploaded: runId→finishedAt, cursor}`。
