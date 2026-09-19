@@ -22,6 +22,18 @@ export class MockProvider implements Provider {
     const intent = firstUserText(req);
     const cmds = parseShell(intent);
 
+    if (req.forceTool === "propose_cards") {
+      // 从用户消息里把能力清单 JSON 抠出来，一条一张卡：有参数 → input_button，否则 button
+      const m = /能力清单[^\n]*\n(\[.*\])/s.exec(intent);
+      const items = m ? (JSON.parse(m[1]!) as { id: string; name: string; description?: string; source: string; params: { name: string; type: string }[] }[]) : [];
+      const cards = items.map((it) => {
+        const fields = it.params.map((p) => ({ key: p.name, label: p.name, kind: p.type === "number" ? "number" : p.type === "bool" ? "bool" : "text", required: true }));
+        const kind = it.source === "shortcuts" ? "shortcut" : "applescript";
+        const template = kind === "shortcut" ? it.name : `tell application "App" to ${it.name}${fields.map((f) => ` "{{${f.key}}}"`).join("")}`;
+        return { name: it.name, description: it.description ?? it.name, control: fields.length ? "input_button" : "button", fields, action: { kind, template }, staticLevel: /delete|remove|清空|删除/i.test(it.name) ? 2 : 1, source: it.source, fromItem: it.id };
+      });
+      return { text: "", toolCalls: [{ id: `m${this.calls}`, name: "propose_cards", args: { cards } }], usage, stopReason: "tool_use" };
+    }
     if (req.forceTool === "propose_plan") {
       const steps = cmds.length
         ? cmds.map((c, i) => ({ title: `运行 ${c}`, channel: "shell" as const }))

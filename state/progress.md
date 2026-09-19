@@ -21,7 +21,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F1.3 云端大脑 [DONE] packages/brain/src/cloud/{cloud-brain,peer-links}.ts + host/relay-host.ts；apps/hub/src/cloud-brain.ts CloudBrainManager（brain:<account>，密钥落 brain_keys 表，hub.attachEndpoint 进程内挂载）；apps/hub/test/cloud-brain.test.ts 端到端（签名确认、拒无签名、拒重放、设备掉线）通过
 - F1.4 daemon-macos（runner A）[PENDING]
 - F1.5 ios（runner B）[PENDING]
-- F1.6 学习应用 [PENDING]
+- F1.6 学习应用（brain 侧）[DONE] packages/brain/src/learn/{learn,cards}.ts：四阶段 app.inventory → propose_cards → 校验（占位符/控件/来源/fromItem/等级只升）→ app.cards；runCard 走策略引擎且卡片等级为下限；转义 applescript/jxa/shell；host-mode 与云端大脑均接入（云端需 deviceId）；20 测试。daemon 侧 app.inventory/app.card.get 归 F1.4（runner）
 - F1.7 终端 [PENDING]
 - F1.8 开源材料 [PENDING]
 

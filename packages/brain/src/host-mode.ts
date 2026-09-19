@@ -4,6 +4,7 @@ import { CuaDriver } from "./gui/cua-driver.js";
 import { StdioHost } from "./host/stdio-host.js";
 import { JevClient } from "./jev/client.js";
 import { PolicyEngine } from "./jev/policy.js";
+import { fetchCard, learnApp, runCard } from "./learn/learn.js";
 import { createProvider } from "./llm/providers.js";
 import { JsonlLog } from "./log.js";
 
@@ -20,6 +21,7 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
   process.stderr.write(`brain: host 模式就绪，provider=${opts.defaultProvider} jev=${jev.enabled ? "on" : "off"} cua-driver=${guiUp ? "on" : "off"}\n`);
 
   const runs = new Map<string, AbortController>();
+  const learns = new Map<string, AbortController>();
 
   const approvals: ApprovalGate = {
     request: async (req) => {
@@ -61,6 +63,38 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
       case "run.cancel":
         runs.get(m.runId)?.abort();
         break;
+      case "app.learn.start": {
+        const settings = host.privacy;
+        let provider;
+        try {
+          provider = createProvider(settings?.localBrainModel ?? opts.defaultProvider);
+        } catch (e) {
+          host.send({ type: "error", code: "provider", message: String(e instanceof Error ? e.message : e), ref: m.id });
+          return;
+        }
+        const ctrl = new AbortController();
+        learns.set(m.bundleId, ctrl);
+        try {
+          await learnApp({ host, provider, emit: (e) => host.send(e), gui: guiUp ? gui : undefined, log: (r) => log?.write(r), signal: ctrl.signal }, { bundleId: m.bundleId, explore: m.explore });
+        } finally {
+          learns.delete(m.bundleId);
+        }
+        break;
+      }
+      case "app.learn.stop":
+        learns.get(m.bundleId)?.abort();
+        break;
+      case "app.card.run": {
+        const got = await fetchCard(host, m.cardId);
+        if ("error" in got) {
+          host.send({ type: "error", code: "card_not_found", message: got.error, ref: m.id });
+          return;
+        }
+        const settings = host.privacy;
+        const policy = new PolicyEngine({ jev, jevEnabled: settings?.jevEnabled ?? jev.enabled, autonomy: settings?.autonomy ?? "balanced" });
+        await runCard({ host, policy, approvals, emit: (e) => host.send(e), log: (r) => log?.write(r), deviceId: m.deviceId ?? host.deviceId ?? "local" }, got.card, m.params);
+        break;
+      }
       case "privacy.state":
         host.invalidateTools();
         break;

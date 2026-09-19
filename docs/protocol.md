@@ -105,3 +105,17 @@ hub 设了 `HUB_CLOUD_BRAIN_PROVIDER=<provider:model>` 时，每个账号在第�
 确认步骤：大脑发 `step.approval_required{challenge, expiresAt}` 给手机并记住 challenge；手机回的 `approval.decision` 必须带签名，大脑按「审批签名」一节的规则用手机的签名公钥验（无签名、过期、nonce 重复、challenge 不匹配都判拒绝，并回 `error{code:"approval_<原因>"}`），验不过这一步按用户拒绝处理，设备上什么都不会跑。
 
 顺序保证：同一个对端发来的信封大脑按到达顺序串行处理（握手帧建链路是异步的，紧跟着的密文不能抢在前面）。对端掉线时，大脑里等它回结果的调用全部判失败，涉及它的 run 取消，链路作废，重连要重新握手。
+
+## 学习应用
+
+「学习应用」= 设备扒原料，大脑总结成卡片，设备存卡片，手机按控件渲染。大脑侧在 `packages/brain/src/learn/`。
+
+原料由 daemon 提供两个工具：
+- `app.inventory {bundleId, phase}`：`phase` 依次是 `sdef` / `menu` / `window` / `shortcuts`，每次返回一份 `AppInventory` JSON（`items[].id` 在同一应用内要稳定：sdef 用 `suite/command`，菜单用路径 `File > Export…`，快捷指令用名字）。某个阶段失败只汇报进度不中断。
+- `app.card.get {cardId}`：返回一张已存的 `CapabilityCard` JSON；找不到返回 `ok:false`。
+
+大脑收到 `app.learn.start{bundleId, explore}` 后：逐阶段调 `app.inventory` 并发 `app.learn.progress{phase, found, message?}`（phase 还有 `explore` / `summarize` / `done` / `failed`）→ 模型 `propose_cards` → 校验（模板里每个 `{{key}}` 必须在 `fields` 里声明；控件和字段要配；来源和动作类型要配，例如 `sdef` 不能出 `shell`；`fromItem` 必须在清单里；`staticLevel` 只能比模型标的高、不能低）→ 发 `app.cards{cards}`。**存卡是设备的事**：daemon 收到 `app.cards` 后持久化，手机端只读缓存。`explore=true` 目前只汇报跳过，GUI 探索留给后续。
+
+`app.card.run{cardId, params}`：大脑用 `app.card.get` 取卡 → 渲染模板（applescript/jxa/shell 三种通道按各自规则转义；shell 参数自动加单引号；bool/number 不转义）→ 过同一套策略引擎（静态分级 → 作用域 → Jev → 自治档位），卡片自带的 `staticLevel` 是下限，L2 卡一律要确认 → 调 `applescript.run` / `jxa.run` / `shortcuts.run` / `shell.run` / `gui.act`。事件复用 `run.created` / `step.*` / `run.finished`，手机上和普通 run 走同一条时间线。
+
+云端大脑：手机发给 `brain:<account>` 的 `app.learn.start` / `app.card.run` **必须带 `deviceId`**（本地大脑可省略），确认同样走签名校验。

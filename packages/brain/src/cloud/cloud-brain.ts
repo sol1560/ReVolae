@@ -13,6 +13,7 @@ import {
   type PublicKeys,
 } from "@cuaremote/protocol";
 import { runIntent, type ApprovalGate, type BrainEvent } from "../agent/loop.js";
+import { fetchCard, learnApp, runCard, type LearnEvent } from "../learn/learn.js";
 import { RelayHost } from "../host/relay-host.js";
 import { JevClient } from "../jev/client.js";
 import { PolicyEngine } from "../jev/policy.js";
@@ -41,7 +42,7 @@ interface RunState {
   deviceId: string;
 }
 
-const PHONE_TYPES = new Set(["intent.submit", "approval.decision", "run.cancel"]);
+const PHONE_TYPES = new Set(["intent.submit", "approval.decision", "run.cancel", "app.learn.start", "app.learn.stop", "app.card.run"]);
 
 /**
  * 云端大脑：跑在 hub 进程里的一个虚拟端点。
@@ -58,6 +59,7 @@ export class CloudBrain {
   readonly links: PeerLinks;
   private readonly hosts = new Map<string, RelayHost>();
   private readonly runs = new Map<string, RunState>();
+  private readonly learns = new Map<string, AbortController>();
   private readonly verifiers = new Map<string, ApprovalVerifier>();
   private readonly privacy = new Map<string, PrivacySettings>();
   private readonly phoneListeners = new Set<(from: string, m: AnyMessage) => void>();
@@ -177,9 +179,92 @@ export class CloudBrain {
         if (st && st.phoneId === phoneId) st.ctrl.abort();
         break;
       }
+      case "app.learn.start":
+        await this.startLearn(phoneId, m);
+        break;
+      case "app.learn.stop":
+        this.learns.get(m.bundleId)?.abort();
+        break;
+      case "app.card.run":
+        await this.startCard(phoneId, m);
+        break;
       default:
         break; // approval.decision 由 waitPhone 消费
     }
+  }
+
+  private async startLearn(phoneId: string, m: Extract<AnyMessage, { type: "app.learn.start" }>) {
+    if (!m.deviceId) {
+      await this.sendTo(phoneId, { type: "error", code: "device_required", message: "发给云端大脑的 app.learn.start 必须带 deviceId", ref: m.id });
+      return;
+    }
+    let provider;
+    try {
+      provider = createProvider(this.o.defaultProvider);
+    } catch (e) {
+      await this.sendTo(phoneId, { type: "error", code: "provider", message: e instanceof Error ? e.message : String(e), ref: m.id });
+      return;
+    }
+    const ctrl = new AbortController();
+    this.learns.set(m.bundleId, ctrl);
+    const emit = (e: LearnEvent) => void this.sendTo(phoneId, e).catch((err) => this.o.log?.({ t: "emit_failed", phoneId, err: String(err) }));
+    try {
+      await learnApp({ host: this.hostFor(m.deviceId), provider, emit, log: this.o.log, signal: ctrl.signal }, { bundleId: m.bundleId, explore: m.explore });
+    } catch (e) {
+      await this.sendTo(phoneId, { type: "error", code: "learn", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {});
+    } finally {
+      this.learns.delete(m.bundleId);
+    }
+  }
+
+  private async startCard(phoneId: string, m: Extract<AnyMessage, { type: "app.card.run" }>) {
+    if (!m.deviceId) {
+      await this.sendTo(phoneId, { type: "error", code: "device_required", message: "发给云端大脑的 app.card.run 必须带 deviceId", ref: m.id });
+      return;
+    }
+    const deviceId = m.deviceId;
+    const host = this.hostFor(deviceId);
+    const got = await fetchCard(host, m.cardId);
+    if ("error" in got) {
+      await this.sendTo(phoneId, { type: "error", code: "card_not_found", message: got.error, ref: m.id });
+      return;
+    }
+    const settings = this.privacy.get(deviceId);
+    const policy = new PolicyEngine({ jev: this.jev, jevEnabled: settings?.jevEnabled ?? this.jev.enabled, autonomy: settings?.autonomy ?? "balanced" });
+    const { emit, approvals } = this.phoneGate(phoneId);
+    try {
+      await runCard({ host, policy, approvals, emit, log: this.o.log, deviceId, providerId: this.o.defaultProvider }, got.card, m.params);
+    } catch (e) {
+      await this.sendTo(phoneId, { type: "error", code: "card", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {});
+    }
+  }
+
+  /** 发给某台手机的事件通道 + 需要它签名确认的门（intent 和卡片共用） */
+  private phoneGate(phoneId: string) {
+    const emit = (e: BrainEvent | LearnEvent) => {
+      if (e.type === "step.approval_required") {
+        this.verifierFor(phoneId).remember({ runId: e.runId, stepId: e.stepId, challenge: e.challenge, expiresAt: e.expiresAt });
+      }
+      void this.sendTo(phoneId, e).catch((err) => this.o.log?.({ t: "emit_failed", phoneId, err: String(err) }));
+    };
+    const approvals: ApprovalGate = {
+      request: async (req) => {
+        const d = await this.waitPhone(
+          phoneId,
+          (x): x is Extract<AnyMessage, { type: "approval.decision" }> => x.type === "approval.decision" && x.runId === req.runId && x.stepId === req.stepId,
+          (req.expiresAt - this.now()) * 1000,
+        );
+        if (!d) return { allow: false, remember: "once" };
+        const v = this.verifierFor(phoneId).verify(d);
+        if (!v.ok) {
+          this.o.log?.({ t: "approval_rejected", runId: req.runId, stepId: req.stepId, reason: v.reason });
+          await this.sendTo(phoneId, { type: "error", code: `approval_${v.reason}`, message: v.message, ref: d.id });
+          return { allow: false, remember: "once" };
+        }
+        return { allow: d.allow, remember: d.remember };
+      },
+    };
+    return { emit, approvals };
   }
 
   private async startRun(phoneId: string, m: Extract<AnyMessage, { type: "intent.submit" }>) {
@@ -199,30 +284,7 @@ export class CloudBrain {
     const runId = randomUUID();
     this.runs.set(runId, { ctrl, phoneId, deviceId });
 
-    const emit = (e: BrainEvent) => {
-      if (e.type === "step.approval_required") {
-        this.verifierFor(phoneId).remember({ runId: e.runId, stepId: e.stepId, challenge: e.challenge, expiresAt: e.expiresAt });
-      }
-      void this.sendTo(phoneId, e).catch((err) => this.o.log?.({ t: "emit_failed", phoneId, err: String(err) }));
-    };
-
-    const approvals: ApprovalGate = {
-      request: async (req) => {
-        const d = await this.waitPhone(
-          phoneId,
-          (x): x is Extract<AnyMessage, { type: "approval.decision" }> => x.type === "approval.decision" && x.runId === req.runId && x.stepId === req.stepId,
-          (req.expiresAt - this.now()) * 1000,
-        );
-        if (!d) return { allow: false, remember: "once" };
-        const v = this.verifierFor(phoneId).verify(d);
-        if (!v.ok) {
-          this.o.log?.({ t: "approval_rejected", runId: req.runId, stepId: req.stepId, reason: v.reason });
-          await this.sendTo(phoneId, { type: "error", code: `approval_${v.reason}`, message: v.message, ref: d.id });
-          return { allow: false, remember: "once" };
-        }
-        return { allow: d.allow, remember: d.remember };
-      },
-    };
+    const { emit, approvals } = this.phoneGate(phoneId);
 
     try {
       await runIntent(

@@ -667,6 +667,9 @@
         "explore": {
           "default": false,
           "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
         }
       },
       "required": [
@@ -730,6 +733,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "deviceId": {
+          "type": "string"
         }
       },
       "required": [

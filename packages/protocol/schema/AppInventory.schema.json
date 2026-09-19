@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "bundleId": {
+      "type": "string"
+    },
+    "appName": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "sdef",
+        "menu",
+        "window",
+        "shortcuts",
+        "explore"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "sdef",
+              "menu",
+              "window",
+              "shortcuts",
+              "explored"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "params": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "default": "unknown",
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "number",
+                    "bool",
+                    "choice",
+                    "date",
+                    "file",
+                    "unknown"
+                  ]
+                },
+                "required": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "choices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "meta": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "source",
+          "id",
+          "name",
+          "params",
+          "meta"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "truncated": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bundleId",
+    "appName",
+    "phase",
+    "items",
+    "truncated"
+  ],
+  "additionalProperties": false
+}

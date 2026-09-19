@@ -174,6 +174,36 @@ export const CapabilityCard = z.object({
 });
 export type CapabilityCard = z.infer<typeof CapabilityCard>;
 
+/** 「学习应用」的原料：daemon 从 sdef / 菜单 / 窗口 / 快捷指令里扒出来的一条能力，还没变成卡片 */
+export const InventoryParam = z.object({
+  name: z.string(),
+  type: z.enum(["text", "number", "bool", "choice", "date", "file", "unknown"]).default("unknown"),
+  required: z.boolean().default(false),
+  choices: z.array(z.string()).optional(),
+  description: z.string().optional(),
+});
+export const InventoryItem = z.object({
+  source: z.enum(["sdef", "menu", "window", "shortcuts", "explored"]),
+  /** 同一应用内稳定：sdef 是 suite/command，菜单是路径 "File > Export…"，快捷指令是名字 */
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  params: z.array(InventoryParam).default([]),
+  /** sdef：{suite, className, directParam}；菜单：{shortcut, enabled}；窗口：{role, actions}；快捷指令：{acceptsInput} */
+  meta: z.record(z.string(), z.unknown()).default({}),
+});
+export type InventoryItem = z.infer<typeof InventoryItem>;
+export const AppInventory = z.object({
+  bundleId: z.string(),
+  appName: z.string(),
+  /** 这一批是哪个阶段扒出来的 */
+  phase: z.enum(["sdef", "menu", "window", "shortcuts", "explore"]),
+  items: z.array(InventoryItem),
+  /** 条目太多被截断 */
+  truncated: z.boolean().default(false),
+});
+export type AppInventory = z.infer<typeof AppInventory>;
+
 export const Shortcut = z.object({
   id: z.string(),
   name: z.string(),

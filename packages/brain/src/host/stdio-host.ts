@@ -14,6 +14,8 @@ export class StdioHost implements Host {
   private listeners = new Set<(m: AnyMessage) => void>();
   private toolsCache?: { tools: ToolDescriptor[]; scope: Scope };
   privacy?: PrivacySettings;
+  /** 宿主设备的 id（从 privacy.state 里学到） */
+  deviceId?: string;
 
   constructor(private readonly input: NodeJS.ReadableStream = process.stdin, private readonly output: NodeJS.WritableStream = process.stdout) {
     input.setEncoding?.("utf8");
@@ -86,7 +88,10 @@ export class StdioHost implements Host {
         }
         continue;
       }
-      if (m.type === "privacy.state") this.privacy = m.settings;
+      if (m.type === "privacy.state") {
+        this.privacy = m.settings;
+        this.deviceId = m.deviceId;
+      }
       for (const l of this.listeners) l(m);
     }
   }

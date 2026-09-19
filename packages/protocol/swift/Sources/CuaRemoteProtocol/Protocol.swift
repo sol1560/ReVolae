@@ -31,6 +31,107 @@ public enum JSONValue: Codable, Sendable, Equatable {
 
 public let protocolVersion = 1
 
+public enum AppInventoryPhase: String, Codable, Sendable, CaseIterable {
+    case sdef = "sdef"
+    case menu = "menu"
+    case window = "window"
+    case shortcuts = "shortcuts"
+    case explore = "explore"
+}
+
+public enum InventoryItemSource: String, Codable, Sendable, CaseIterable {
+    case sdef = "sdef"
+    case menu = "menu"
+    case window = "window"
+    case shortcuts = "shortcuts"
+    case explored = "explored"
+}
+
+public enum InventoryParamType: String, Codable, Sendable, CaseIterable {
+    case text = "text"
+    case number = "number"
+    case bool = "bool"
+    case choice = "choice"
+    case date = "date"
+    case file = "file"
+    case unknown = "unknown"
+}
+
+public struct InventoryParam: Codable, Sendable {
+    public var name: String
+    public var `type`: InventoryParamType?
+    public var required: Bool?
+    public var choices: [String]?
+    public var description: String?
+
+    public init(name: String, `type`: InventoryParamType? = nil, required: Bool? = nil, choices: [String]? = nil, description: String? = nil) {
+        self.name = name
+        self.`type` = `type`
+        self.required = required
+        self.choices = choices
+        self.description = description
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case `type`
+        case required
+        case choices
+        case description
+    }
+}
+
+public struct InventoryItem: Codable, Sendable {
+    public var source: InventoryItemSource
+    public var id: String
+    public var name: String
+    public var description: String?
+    public var params: [InventoryParam]?
+    public var meta: [String: JSONValue]?
+
+    public init(source: InventoryItemSource, id: String, name: String, description: String? = nil, params: [InventoryParam]? = nil, meta: [String: JSONValue]? = nil) {
+        self.source = source
+        self.id = id
+        self.name = name
+        self.description = description
+        self.params = params
+        self.meta = meta
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case source
+        case id
+        case name
+        case description
+        case params
+        case meta
+    }
+}
+
+public struct AppInventory: Codable, Sendable {
+    public var bundleId: String
+    public var appName: String
+    public var phase: AppInventoryPhase
+    public var items: [InventoryItem]
+    public var truncated: Bool?
+
+    public init(bundleId: String, appName: String, phase: AppInventoryPhase, items: [InventoryItem], truncated: Bool? = nil) {
+        self.bundleId = bundleId
+        self.appName = appName
+        self.phase = phase
+        self.items = items
+        self.truncated = truncated
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case bundleId
+        case appName
+        case phase
+        case items
+        case truncated
+    }
+}
+
 public enum ApprovalSignatureAlg: String, Codable, Sendable, CaseIterable {
     case eS256 = "ES256"
     case ed25519 = "Ed25519"
@@ -951,11 +1052,13 @@ public struct AppLearnStart: Codable, Sendable {
     public var type: String = "app.learn.start"
     public var bundleId: String
     public var explore: Bool?
+    public var deviceId: String?
 
-    public init(id: String, bundleId: String, explore: Bool? = nil) {
+    public init(id: String, bundleId: String, explore: Bool? = nil, deviceId: String? = nil) {
         self.id = id
         self.bundleId = bundleId
         self.explore = explore
+        self.deviceId = deviceId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -964,6 +1067,7 @@ public struct AppLearnStart: Codable, Sendable {
         case `type`
         case bundleId
         case explore
+        case deviceId
     }
 }
 
@@ -994,11 +1098,13 @@ public struct AppCardRun: Codable, Sendable {
     public var type: String = "app.card.run"
     public var cardId: String
     public var params: [String: String]?
+    public var deviceId: String?
 
-    public init(id: String, cardId: String, params: [String: String]? = nil) {
+    public init(id: String, cardId: String, params: [String: String]? = nil, deviceId: String? = nil) {
         self.id = id
         self.cardId = cardId
         self.params = params
+        self.deviceId = deviceId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1007,6 +1113,7 @@ public struct AppCardRun: Codable, Sendable {
         case `type`
         case cardId
         case params
+        case deviceId
     }
 }
 

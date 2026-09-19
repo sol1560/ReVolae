@@ -69,9 +69,10 @@ export const HistoryList = msg("history.list", { cursor: z.string().optional(), 
 export const PrivacySet = msg("privacy.set", { settings: PrivacySettings });
 export const PrivacyGet = msg("privacy.get", {});
 export const ScopeSet = msg("scope.set", { scope: Scope });
-export const AppLearnStart = msg("app.learn.start", { bundleId: z.string(), explore: z.boolean().default(false) });
+/** deviceId：直接发给设备时可省；发给云端大脑时必填（大脑得知道去哪台设备扒 / 跑） */
+export const AppLearnStart = msg("app.learn.start", { bundleId: z.string(), explore: z.boolean().default(false), deviceId: z.string().optional() });
 export const AppLearnStop = msg("app.learn.stop", { bundleId: z.string() });
-export const AppCardRun = msg("app.card.run", { cardId: z.string(), params: z.record(z.string(), z.string()).default({}) });
+export const AppCardRun = msg("app.card.run", { cardId: z.string(), params: z.record(z.string(), z.string()).default({}), deviceId: z.string().optional() });
 export const AppCardsGet = msg("app.cards.get", { bundleId: z.string().optional() });
 export const CapabilitiesGet = msg("capabilities.get", {});
 
