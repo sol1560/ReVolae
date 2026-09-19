@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@cuaremote/ipad-pointer-calibration": "workspace:*",
     "@cuaremote/protocol": "workspace:*",
     "zod": "^4.1.0"
   }

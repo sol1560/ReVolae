@@ -17,3 +17,4 @@ export { PeerLinks } from "./cloud/peer-links.js";
 export { CloudBrain, type CloudBrainOptions } from "./cloud/cloud-brain.js";
 export { learnApp, runCard, fetchCard, INVENTORY_TOOL, CARD_GET_TOOL, type LearnDeps, type LearnInput, type LearnOutcome, type LearnEvent, type LearnPhase, type RunCardDeps, type RunCardOutcome } from "./learn/learn.js";
 export { validateCards, renderTemplate, escapeFor, toolArgs, placeholders, CARD_TOOL, PROPOSE_CARDS_TOOL, ProposedCard } from "./learn/cards.js";
+export { IpadHost, IPAD_TOOLS, IPAD_DEVICE_TOOLS, hasIpadTools, wrapIfIpad, CALIBRATION_MAGNITUDES } from "./ipad/ipad-host.js";

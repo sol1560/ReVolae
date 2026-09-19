@@ -14,7 +14,9 @@ import {
 } from "@cuaremote/protocol";
 import { runIntent, type ApprovalGate, type BrainEvent } from "../agent/loop.js";
 import { fetchCard, learnApp, runCard, type LearnEvent } from "../learn/learn.js";
+import { IpadHost } from "../ipad/ipad-host.js";
 import { RelayHost } from "../host/relay-host.js";
+import type { Host } from "../host/types.js";
 import { JevClient } from "../jev/client.js";
 import { PolicyEngine } from "../jev/policy.js";
 import { createProvider } from "../llm/providers.js";
@@ -60,6 +62,7 @@ export class CloudBrain {
   private readonly hosts = new Map<string, RelayHost>();
   private readonly runs = new Map<string, RunState>();
   private readonly learns = new Map<string, AbortController>();
+  private readonly ipadHosts = new Map<string, IpadHost>();
   private readonly verifiers = new Map<string, ApprovalVerifier>();
   private readonly privacy = new Map<string, PrivacySettings>();
   private readonly phoneListeners = new Set<(from: string, m: AnyMessage) => void>();
@@ -112,6 +115,8 @@ export class CloudBrain {
   /** 对端掉线：等它回消息的调用全部判失败，链路作废（重连要重新握手） */
   peerOffline(peerId: string) {
     this.hosts.get(peerId)?.failAll(`${peerId} 掉线了`);
+    // iPad 重连后指针位置不可信，校准模型也重新从设备取
+    this.ipadHosts.delete(peerId);
     this.links.drop(peerId);
     this.inbound.delete(peerId);
     for (const [runId, st] of this.runs) {
@@ -133,6 +138,18 @@ export class CloudBrain {
     if (!h) {
       h = new RelayHost(deviceId, { send: (to, frame) => this.links.send(to, frame) });
       this.hosts.set(deviceId, h);
+    }
+    return h;
+  }
+
+  /** 给 agent / 卡片用的宿主：iPad 设备外面包一层绝对坐标工具（校准模型随实例缓存） */
+  private agentHostFor(deviceId: string): Host {
+    const relay = this.hostFor(deviceId);
+    if (this.o.devicePlatform?.(deviceId) !== "ipados") return relay;
+    let h = this.ipadHosts.get(deviceId);
+    if (!h) {
+      h = new IpadHost(relay, { log: this.o.log });
+      this.ipadHosts.set(deviceId, h);
     }
     return h;
   }
@@ -209,7 +226,7 @@ export class CloudBrain {
     this.learns.set(m.bundleId, ctrl);
     const emit = (e: LearnEvent) => void this.sendTo(phoneId, e).catch((err) => this.o.log?.({ t: "emit_failed", phoneId, err: String(err) }));
     try {
-      await learnApp({ host: this.hostFor(m.deviceId), provider, emit, log: this.o.log, signal: ctrl.signal }, { bundleId: m.bundleId, explore: m.explore });
+      await learnApp({ host: this.agentHostFor(m.deviceId), provider, emit, log: this.o.log, signal: ctrl.signal }, { bundleId: m.bundleId, explore: m.explore });
     } catch (e) {
       await this.sendTo(phoneId, { type: "error", code: "learn", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {});
     } finally {
@@ -223,7 +240,7 @@ export class CloudBrain {
       return;
     }
     const deviceId = m.deviceId;
-    const host = this.hostFor(deviceId);
+    const host = this.agentHostFor(deviceId);
     const got = await fetchCard(host, m.cardId);
     if ("error" in got) {
       await this.sendTo(phoneId, { type: "error", code: "card_not_found", message: got.error, ref: m.id });
@@ -279,7 +296,7 @@ export class CloudBrain {
     }
     const settings = this.privacy.get(deviceId);
     const policy = new PolicyEngine({ jev: this.jev, jevEnabled: settings?.jevEnabled ?? this.jev.enabled, autonomy: settings?.autonomy ?? "balanced" });
-    const host = this.hostFor(deviceId);
+    const host = this.agentHostFor(deviceId);
     const ctrl = new AbortController();
     const runId = randomUUID();
     this.runs.set(runId, { ctrl, phoneId, deviceId });

@@ -119,3 +119,21 @@ hub 设了 `HUB_CLOUD_BRAIN_PROVIDER=<provider:model>` 时，每个账号在第�
 `app.card.run{cardId, params}`：大脑用 `app.card.get` 取卡 → 渲染模板（applescript/jxa/shell 三种通道按各自规则转义；shell 参数自动加单引号；bool/number 不转义）→ 过同一套策略引擎（静态分级 → 作用域 → Jev → 自治档位），卡片自带的 `staticLevel` 是下限，L2 卡一律要确认 → 调 `applescript.run` / `jxa.run` / `shortcuts.run` / `shell.run` / `gui.act`。事件复用 `run.created` / `step.*` / `run.finished`，手机上和普通 run 走同一条时间线。
 
 云端大脑：手机发给 `brain:<account>` 的 `app.learn.start` / `app.card.run` **必须带 `deviceId`**（本地大脑可省略），确认同样走签名校验。
+
+## iPad 被控
+
+iPad 上没有可用的系统级自动化接口，靠 USB dongle 模拟键鼠（`firmware/dongle/`）。dongle 只收**相对**增量、只能从 iPad 自己的 USB 子网访问，所以 iPad app 作为设备端只提供几个底层工具，大脑侧（`packages/brain/src/ipad/ipad-host.ts`）把它们包成模型能用的绝对坐标工具。
+
+iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`）：
+- `ipad.screen {}`：截屏。`output` 是 JSON `{width, height, pointer?: {x, y}}`，附件一张 JPEG。**截图像素坐标和 pointer 必须是同一坐标系**，大脑会用截图坐标去点。
+- `ipad.pointer {}`：只读当前指针位置（校准页里用 UIPointerInteraction / hover 拿），`output` 是 `{x, y, width, height}`。没有这个工具就不能校准，只能用设备存的模型。
+- `ipad.hid.macro {steps}`：把 `steps` 原样 POST 到 dongle `/macro`（≤128 步，大脑已分批），然后轮询 `/status` 到 `busy=false` 再回 `tools.result`。dongle 回 4xx/409 时 `ok:false` 并把状态码放进 `error`。
+- `ipad.clipboard.write {text}`：写系统剪贴板（非 ASCII 文本靠它 + Cmd+V 输入）。要求 app 在前台。
+- `ipad.calibration.get {}` / `ipad.calibration.put {model}`：读 / 存校准模型 JSON（`fitCalibration` 的输出），让大脑重连后不用重新校准。
+
+大脑给模型的工具：`ipad.screenshot`、`ipad.tap {x, y, count?}`、`ipad.scroll {x?, y?, dx?, dy?}`（dy 正数向下）、`ipad.type {text}`、`ipad.key {key, modifiers?}`、`ipad.calibrate`。这些都走普通策略引擎和确认流程（`channel: "ipad"`）。底层工具不会出现在模型的工具表里。
+
+行为约定：
+- 指针位置由大脑预测跟踪；`ipad.screen` 带回 `pointer` 时以设备为准；宏失败或设备重连后视为未知，下一次点击先往左上角撞墙归零（用户会看到指针飞到左上角）。
+- 校准：先把指针挪到屏幕中部，再对 1/2/4/8/12/16/24/32/48/64/80 每个幅度按 +x/−x/+y/−y 各发一个**单报文**宏并读指针，共 44 个样本，拟合后存回设备。改了指针速度 / 显示缩放 / 横竖屏要重新校准。
+- 文本：美式键盘可直接敲的 ASCII 走 `key.type`（1024 字符一块）；含其它字符时整段写剪贴板再 Cmd+V。

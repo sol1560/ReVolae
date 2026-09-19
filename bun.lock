@@ -42,6 +42,7 @@
       "name": "@cuaremote/brain",
       "version": "0.1.0",
       "dependencies": {
+        "@cuaremote/ipad-pointer-calibration": "workspace:*",
         "@cuaremote/protocol": "workspace:*",
         "zod": "^4.1.0",
       },

@@ -310,6 +310,14 @@ export function describe(tool: ToolDescriptor, args: Record<string, unknown>): C
       return { channel: "gui", summary: "截屏", detail: `screenshot ${JSON.stringify(args)}` };
     case "gui.act":
       return { channel: "gui", summary: `在 ${s(args.app)} 里：${s(args.goal)}`, detail: JSON.stringify(args), targetApp: s(args.app) };
+    case "ipad.tap":
+      return { channel: "ipad", summary: `点 iPad 屏幕 (${s(args.x)}, ${s(args.y)})${Number(args.count) > 1 ? ` ×${s(args.count)}` : ""}`, detail: `${tool.name} ${JSON.stringify(args)}` };
+    case "ipad.type":
+      return { channel: "ipad", summary: `在 iPad 输入「${s(args.text).slice(0, 40)}」`, detail: s(args.text) };
+    case "ipad.key":
+      return { channel: "ipad", summary: `iPad 按键 ${[...(Array.isArray(args.modifiers) ? args.modifiers : []), args.key].join("+")}`, detail: `${tool.name} ${JSON.stringify(args)}` };
+    case "ipad.screenshot":
+      return { channel: "ipad", summary: "截 iPad 屏幕", detail: tool.name };
     default:
       if (tool.name.startsWith("gui."))
         return { channel: "gui", summary: `界面操作 ${tool.name.slice(4)}`, detail: `${tool.name} ${JSON.stringify(args)}`, targetApp: args.bundle_id ? s(args.bundle_id) : args.name ? s(args.name) : undefined };

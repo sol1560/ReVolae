@@ -26,7 +26,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F1.8 开源材料 [PENDING]
 
 ## M2 - iPad + 终端进阶 [RUNNING]
-- F2.1 firmware [DONE] 已回收：ESP32-S3 TinyUSB NCM+HID+HTTP 主固件 + RP2040 CircuitPython 备用（未编译/未真机）· F2.2 校准 [DONE] firmware/dongle/calibration 单调分段线性拟合，4 测试，模拟 P95 0.72px · F2.3 brain iPad 工具 [PENDING] · F2.4 iOS iPad 被控（runner B）[PENDING] · F2.5 SSH 进阶（runner B）[PENDING]
+- F2.1 firmware [DONE] 已回收：ESP32-S3 TinyUSB NCM+HID+HTTP 主固件 + RP2040 CircuitPython 备用（未编译/未真机）· F2.2 校准 [DONE] firmware/dongle/calibration 单调分段线性拟合，4 测试，模拟 P95 0.72px · F2.3 brain iPad 工具 [DONE] packages/brain/src/ipad/ipad-host.ts：IpadHost 把 iPad app 的 6 个底层工具（screen/pointer/hid.macro/clipboard/calibration.get|put）包成 ipad.screenshot/tap/scroll/type/key/calibrate；校准 44 样本→fitCalibration→存回设备；指针预测+归零；宏分批≤128；ASCII 直敲/非 ASCII 剪贴板；host-mode 懒包装、云端大脑按 platform=ipados 包装；11 测试 · F2.4 iOS iPad 被控（runner B）[PENDING] · F2.5 SSH 进阶（runner B）[PENDING]
 
 ## M3 - 产品化 [PENDING]
 - F3.1 语音（runner B）· F3.2 模型设置页 · F3.3 密文同步 · F3.4 实时画面 · F3.5 OSC 133 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]

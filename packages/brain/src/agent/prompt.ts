@@ -21,7 +21,9 @@ export function systemPrompt(p: { platform: string; tools: ToolDescriptor[]; sco
     `作用域：允许的目录 ${p.scope.allowedDirs.join(", ") || "（无限制）"}；允许的应用 ${p.scope.allowedApps.join(", ") || "（无限制）"}。`,
   ];
   if (p.hasJevAx) lines.push("", "gui.act 是快捷方式：给目标和应用名，系统用快速模型从无障碍元素里选目标并执行一步，比你自己看截图便宜 50 倍。GUI 任务优先用它，它说「需要视觉」时你再用 gui.get_window_state + 截图。");
-  if (!p.hasGui) lines.push("", "这台设备当前没有图形界面自动化能力（cua-driver 未运行），只能用脚本类工具。");
+  const hasIpad = p.tools.some((t) => t.name === "ipad.tap");
+  if (hasIpad) lines.push("", "这是一台 iPad，通过 USB dongle 模拟键鼠操作，没有命令行：先 ipad.screenshot 看屏幕，再用截图坐标 ipad.tap；文字用 ipad.type；回主屏幕 ipad.key h+cmd；切换应用 ipad.key tab+cmd。每次点击后想确认结果再截图，不要盲点。ipad.tap 报「还没校准」就先 ipad.calibrate。");
+  else if (!p.hasGui) lines.push("", "这台设备当前没有图形界面自动化能力（cua-driver 未运行），只能用脚本类工具。");
   if (p.mode === "terminal") lines.push("", "当前是「终端模式」：你不能执行任何东西，只能用 propose_command 建议一条命令，并解释它做什么。");
   lines.push("", "开始时先调用 propose_plan 给出 1–6 步的计划（每步一句话 + 通道），然后逐步执行。计划可以在执行中改。");
   return lines.join("\n");
