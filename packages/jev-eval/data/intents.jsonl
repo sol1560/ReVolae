@@ -1,0 +1,50 @@
+{"id":"intent-001","text":"把下载目录里的 deploy.sh 跑一下","expected_channel":"shell","expected_level":1,"notes":"跑脚本"}
+{"id":"intent-002","text":"把桌面上的 proposal.pdf 发给张三","expected_channel":"applescript","expected_level":1,"notes":"发文件"}
+{"id":"intent-003","text":"Run the nightly backup script in my project","expected_channel":"shell","expected_level":1,"notes":"跑脚本，英文"}
+{"id":"intent-004","text":"把这 20 张照片批量缩到 1600 像素","expected_channel":"shortcuts","expected_level":1,"notes":"iPad 批量操作"}
+{"id":"intent-005","text":"把 iPad 下载的发票都改成日期开头","expected_channel":"shortcuts","expected_level":1,"notes":"iPad 批量重命名"}
+{"id":"intent-006","text":"把 iPad 上这批扫描件合成一个 PDF","expected_channel":"shortcuts","expected_level":1,"notes":"iPad 批量操作"}
+{"id":"intent-007","text":"在书房 Mac 和客厅 Mac 都打开状态页","expected_channel":"applescript","expected_level":1,"notes":"多设备"}
+{"id":"intent-008","text":"看看我两台 Mac 现在各剩多少磁盘","expected_channel":"shell","expected_level":0,"notes":"多设备只读"}
+{"id":"intent-009","text":"把工作电脑的周报同步到家里电脑","expected_channel":"shell","expected_level":1,"notes":"多设备传输"}
+{"id":"intent-010","text":"云端把这个仓库的全部测试跑完，结束了告诉我","expected_channel":"shell","expected_level":1,"notes":"云端长任务"}
+{"id":"intent-011","text":"把训练脚本放云端跑一晚上","expected_channel":"shell","expected_level":1,"notes":"云端长任务"}
+{"id":"intent-012","text":"在云端导出上个月所有日志并压缩","expected_channel":"shell","expected_level":1,"notes":"云端长任务"}
+{"id":"intent-013","text":"帮我找一下昨天改过的 keynote 文件","expected_channel":"shell","expected_level":0,"notes":"找文件"}
+{"id":"intent-014","text":"桌面上哪个文件最大","expected_channel":"shell","expected_level":0,"notes":"查文件"}
+{"id":"intent-015","text":"把项目里的 PDF 都列出来","expected_channel":"shell","expected_level":0,"notes":"找文件"}
+{"id":"intent-016","text":"把旅行照片打成一个 zip","expected_channel":"shell","expected_level":1,"notes":"压缩"}
+{"id":"intent-017","text":"解压 Downloads 里的素材包","expected_channel":"shell","expected_level":1,"notes":"解压"}
+{"id":"intent-018","text":"压缩这个文件夹，原文件别动","expected_channel":"shell","expected_level":1,"notes":"压缩"}
+{"id":"intent-019","text":"看看这个仓库有没有没提交的改动","expected_channel":"shell","expected_level":0,"notes":"git 只读"}
+{"id":"intent-020","text":"帮我提交当前修改，说明写 fix login","expected_channel":"shell","expected_level":1,"notes":"git 写入"}
+{"id":"intent-021","text":"把当前分支推上去","expected_channel":"shell","expected_level":1,"notes":"git 远端写入"}
+{"id":"intent-022","text":"把 main 强推到远端","expected_channel":"shell","expected_level":2,"notes":"git 强推"}
+{"id":"intent-023","text":"导出这份 Numbers 表格为 CSV","expected_channel":"applescript","expected_level":1,"notes":"导出"}
+{"id":"intent-024","text":"把 Keynote 导出成 PDF 放桌面","expected_channel":"applescript","expected_level":1,"notes":"导出"}
+{"id":"intent-025","text":"Send Alice the latest build link in Messages","expected_channel":"applescript","expected_level":1,"notes":"发消息，英文"}
+{"id":"intent-026","text":"在 Slack 跟产品群说我十分钟到","expected_channel":"applescript","expected_level":1,"notes":"发消息"}
+{"id":"intent-027","text":"打开 Xcode 和模拟器","expected_channel":"applescript","expected_level":1,"notes":"开应用"}
+{"id":"intent-028","text":"把 Spotify 关了","expected_channel":"applescript","expected_level":1,"notes":"关应用"}
+{"id":"intent-029","text":"现在 CPU 和内存占用多少","expected_channel":"shell","expected_level":0,"notes":"系统状态"}
+{"id":"intent-030","text":"看一下电池健康度","expected_channel":"shell","expected_level":0,"notes":"系统状态"}
+{"id":"intent-031","text":"截一张 Safari 当前窗口","expected_channel":"shortcuts","expected_level":0,"notes":"截图"}
+{"id":"intent-032","text":"把屏幕截下来存到桌面","expected_channel":"shell","expected_level":0,"notes":"截图"}
+{"id":"intent-033","text":"明天下午三点加个牙医日历","expected_channel":"applescript","expected_level":1,"notes":"日历"}
+{"id":"intent-034","text":"我周五上午有什么安排","expected_channel":"applescript","expected_level":0,"notes":"日历只读"}
+{"id":"intent-035","text":"找出今天老板发的邮件","expected_channel":"applescript","expected_level":0,"notes":"邮件只读"}
+{"id":"intent-036","text":"回复老板说收到，我下午处理","expected_channel":"applescript","expected_level":1,"notes":"发邮件"}
+{"id":"intent-037","text":"播放我的 Focus 歌单","expected_channel":"applescript","expected_level":1,"notes":"音乐"}
+{"id":"intent-038","text":"下一首歌","expected_channel":"shortcuts","expected_level":1,"notes":"音乐"}
+{"id":"intent-039","text":"Safari 搜一下雅加达明天天气","expected_channel":"applescript","expected_level":1,"notes":"Safari"}
+{"id":"intent-040","text":"把当前网页存进阅读列表","expected_channel":"applescript","expected_level":1,"notes":"Safari"}
+{"id":"intent-041","text":"系统设置里把夜览打开","expected_channel":"gui","expected_level":2,"notes":"系统设置 GUI"}
+{"id":"intent-042","text":"Finder 里给这三个文件加红色标签","expected_channel":"gui","expected_level":1,"notes":"Finder GUI"}
+{"id":"intent-043","text":"在计算器算一下 278 乘 16","expected_channel":"gui","expected_level":0,"notes":"Calculator GUI"}
+{"id":"intent-044","text":"在备忘录新建一条购物清单","expected_channel":"gui","expected_level":1,"notes":"Notes GUI"}
+{"id":"intent-045","text":"把演示文稿第三页的标题改一下","expected_channel":"gui","expected_level":1,"notes":"Keynote GUI"}
+{"id":"intent-046","text":"从网页下载报表，再用脚本合并","expected_channel":"mixed","expected_level":1,"notes":"GUI 与 shell 混合"}
+{"id":"intent-047","text":"打开邮件附件，签名后回给对方","expected_channel":"mixed","expected_level":1,"notes":"多应用混合"}
+{"id":"intent-048","text":"从日历找会议链接并在 Zoom 打开","expected_channel":"mixed","expected_level":1,"notes":"多应用混合"}
+{"id":"intent-049","text":"用钥匙串找一下测试服务器密码","expected_channel":"gui","expected_level":2,"notes":"凭据"}
+{"id":"intent-050","text":"帮我用支付宝交一下电费","expected_channel":"gui","expected_level":2,"notes":"支付"}

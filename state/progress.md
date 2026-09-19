@@ -11,7 +11,7 @@ Current: M0 - PoC
 - F0.5 Jev 客户端 + 策略引擎 [DONE]
 - F0.5b jev-ax [DONE]
 - F0.6 poc-web [DONE] 11 测试；orb 内已起 :8787 并截图验证
-- F0.7 jev-eval [DONE-REMOTE] 线程 T-01a0b9e2 完成，待回收进主仓
+- F0.7 jev-eval [DONE] 已回收；uv run pytest 61 通过；报告 packages/jev-eval/reports/report.md（Jev 数字为 MOCK）
 - F0.8 本地模型实测（runner A）[PENDING]
 - Scrutiny: PENDING · Cross-review: PENDING · Probe: PENDING · UX: PENDING
 

@@ -1,0 +1,12 @@
+{
+  "samples": 50,
+  "cli": 40,
+  "coverage": 0.8,
+  "channels": {
+    "shell": 20,
+    "applescript": 15,
+    "shortcuts": 5,
+    "gui": 7,
+    "mixed": 3
+  }
+}

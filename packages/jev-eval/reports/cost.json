@@ -1,0 +1,41 @@
+{
+  "runs": 5,
+  "cost_p50_usd": 0.018000000000000002,
+  "cost_p95_usd": 0.045,
+  "steps_p50": 3,
+  "steps_p95": 6,
+  "jev_per_step_p50": 1.0,
+  "jev_per_step_p95": 1.0,
+  "details": [
+    {
+      "run_id": "run-1",
+      "usd": 0.008,
+      "steps": 2,
+      "jev": 2
+    },
+    {
+      "run_id": "run-2",
+      "usd": 0.012,
+      "steps": 3,
+      "jev": 3
+    },
+    {
+      "run_id": "run-3",
+      "usd": 0.018000000000000002,
+      "steps": 3,
+      "jev": 3
+    },
+    {
+      "run_id": "run-4",
+      "usd": 0.027000000000000003,
+      "steps": 5,
+      "jev": 5
+    },
+    {
+      "run_id": "run-5",
+      "usd": 0.045,
+      "steps": 6,
+      "jev": 6
+    }
+  ]
+}

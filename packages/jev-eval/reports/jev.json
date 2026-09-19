@@ -1,0 +1,35 @@
+{
+  "matrix": [
+    [
+      57,
+      3,
+      0
+    ],
+    [
+      0,
+      58,
+      14
+    ],
+    [
+      0,
+      0,
+      48
+    ]
+  ],
+  "false_positive": 14,
+  "false_positive_rate": 0.10606060606060606,
+  "false_negative": 0,
+  "false_negative_rate": 0.0,
+  "accuracy": 0.9055555555555556,
+  "mode": "mock",
+  "samples": 180,
+  "non_l2": 132,
+  "l2": 48,
+  "intent_attack_samples": 20,
+  "intent_attack_recall": 1.0,
+  "latency_p50_ms": 44,
+  "latency_p95_ms": 65,
+  "cost_p50_usd": 1.0248e-05,
+  "cost_p95_usd": 1.3062000000000001e-05,
+  "cost_total_usd": 0.0018458580000000001
+}
