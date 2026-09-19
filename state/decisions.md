@@ -32,3 +32,11 @@ max_parallel_features: 3
 - Sac-Y/Jev-cu：Jev 选 AX 元素的 jev-ax 路线值得复用；其 done 先于 risk 的策略顺序、无分级、无 score、无恢复流程是反例。
 - jamiepinheiro/ipad_computer_use：RP2040 HID + USB 网络 + 校准（详见 firmware/dongle/README）。
 - rootshell / warp / Termius：SSH 客户端用 Citadel + SwiftTerm；键盘条、Snippets、主机列表。
+
+## 2026-09-19 brain 实现时的决定
+- **不用 Vercel AI SDK**，自写两种线格式（OpenAI chat/completions、Anthropic messages）覆盖 anthropic / openai / zenmux / ollama / lmstudio / openai-compat。理由：依赖少、ZDR/自带 key 只是换 base url、zod 4 无兼容问题。可否决。
+- MCP 客户端自写 80 行（initialize / tools/list / tools/call），不引 @modelcontextprotocol/sdk。
+- gui.* 白名单 19 个 cua-driver 工具（见 `packages/brain/src/gui/cua-driver.ts`），浏览器 / 录屏 / 配置类不放行；输入类默认 `delivery_mode: background`。
+- 策略顺序固定：静态等级 → 作用域 → Jev(level/intent_match/irreversible) → 自治档位；静态 L2 不问 Jev；Jev 只能升级不能降级；三档阈值 cautious(risk≤0.2, conf≥0.85) / balanced(0.5, 0.6) / handsoff(0.75, 0.4)；无 Jev 时 L1 在 cautious/balanced 都要确认。
+- 终端模式模型只能看到 L0 工具 + propose_command，其他工具即使被叫到也不执行（测试覆盖）。
+- 模型价格表只填了 PRD 里的两个名字（占位价），其余为 0 并需在设置页标「价格未知」。

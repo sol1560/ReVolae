@@ -4,12 +4,12 @@ Status: RUNNING
 Current: M0 - PoC
 
 ## M0 - PoC [RUNNING]
-- F0.1 monorepo 初始化 [PENDING]
-- F0.2 packages/protocol [PENDING]
-- F0.3 brain 工具注册表 [PENDING]
-- F0.4 brain agent loop + providers + CLI [PENDING]
-- F0.5 Jev 客户端 + 策略引擎 [PENDING]
-- F0.5b jev-ax [PENDING]
+- F0.1 monorepo 初始化 [DONE]
+- F0.2 packages/protocol [DONE]
+- F0.3 brain 工具注册表 [DONE]
+- F0.4 brain agent loop + providers + CLI [DONE]
+- F0.5 Jev 客户端 + 策略引擎 [DONE]
+- F0.5b jev-ax [DONE]
 - F0.6 poc-web [PENDING]
 - F0.7 jev-eval [PENDING]
 - F0.8 本地模型实测（runner A）[PENDING]

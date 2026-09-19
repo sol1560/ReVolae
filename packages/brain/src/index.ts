@@ -1,1 +1,14 @@
-export {};
+export * from "./host/types.js";
+export { LocalBunHost, LOCAL_TOOLS } from "./host/local-bun-host.js";
+export { StdioHost } from "./host/stdio-host.js";
+export * from "./llm/types.js";
+export { createProvider, lookupPrice } from "./llm/providers.js";
+export { MockProvider } from "./llm/mock.js";
+export { JevClient, type JevQuestion, type JevAnswer } from "./jev/client.js";
+export { PolicyEngine, staticLevel, actionFingerprint, type PolicyDecision, type Autonomy } from "./jev/policy.js";
+export { CuaDriver, GUI_WHITELIST } from "./gui/cua-driver.js";
+export { jevAxDecide, toCuaCall, TARGET_CONFIDENCE_FLOOR } from "./gui/jev-ax.js";
+export { McpStdioClient } from "./gui/mcp-stdio-client.js";
+export { runIntent, describe, type AgentDeps, type ApprovalGate, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
+export { runHostMode } from "./host-mode.js";
+export { JsonlLog } from "./log.js";
