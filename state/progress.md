@@ -1,7 +1,7 @@
 # Mission Progress
 
-Status: RUNNING
-Current: M1 - Mac MVP（F0.8 等 runner）
+Status: BLOCKED（orb 部分全部完成；Mac 部分等 runner sol-mac）
+Current: 报告已写 state/reports/mission-report.md；下一步 runner 上线后建线程 A/B
 
 ## M0 - PoC [RUNNING]
 - F0.1 monorepo 初始化 [DONE]
