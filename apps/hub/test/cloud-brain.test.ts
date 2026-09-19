@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { AnyMessage, E2ELink, controlFrame, decodeFrame, decodeRelay, mkMsg, parseControl, signApproval, type MsgBody } from "@cuaremote/protocol";
+import { Billing, LocalLedger } from "../src/billing.js";
 import { brainIdOf } from "../src/cloud-brain.js";
+import { HubStore } from "../src/db.js";
 import { createHubServer } from "../src/server.js";
 import { Endpoint, b64, pair } from "./helpers.js";
 
@@ -182,6 +184,64 @@ describe("云端大脑（hub 进程内）", () => {
       void srv2.server.stop(true);
     }
   });
+
+  test("计费：免费次数用完且没余额 → intent.submit 直接回 credits_exhausted；有余额的 run 结束后按成本结算", async () => {
+    const store = new HubStore(":memory:");
+    const billing = new Billing(store, { ledger: new LocalLedger(store, () => 1_800_000_000), freeRunsPerMonth: 1, margin: 0, creditsPerUsd: 1000, now: () => 1_800_000_000 });
+    const srv2 = createHubServer({ port: 0, store, billing, cloudBrain: { defaultProvider: "mock:paid", billing } });
+    try {
+      const mac = await Endpoint.make("mac-bill", "device");
+      const phone = await Endpoint.make("phone-bill", "phone", "Ed25519");
+      await mac.login(srv2.url);
+      await phone.login(srv2.url);
+      expect((await pair(phone, mac, b64(new Uint8Array(16).fill(3)))).rp.ok).toBe(true);
+      const macLink = await new BrainLink(mac, brainId).open();
+      const phoneLink = await new BrainLink(phone, brainId).open();
+      serveDevice(macLink, async (m) => ({ type: "tools.result", callId: m.callId, ok: true, output: "ok", attachments: [], ms: 1 }));
+
+      // 第 1 次：占免费额度；mock 是 L1 → 手机会被问，直接拒掉让 run 快点结束
+      await phoneLink.send({ type: "intent.submit", text: "shell: echo one", deviceId: mac.id, mode: "agent" });
+      const c1 = await phoneLink.expect("run.created");
+      const ask = await phoneLink.expect("step.approval_required", (m) => m.runId === c1.runId);
+      await phoneLink.send({ type: "approval.decision", runId: ask.runId, stepId: ask.stepId, allow: false, remember: "once" });
+      const fin1 = await phoneLink.expect("run.finished", (m) => m.runId === c1.runId);
+      // 结算是在 runIntent 返回后 finally 里做的，等一拍
+      await new Promise((r) => setTimeout(r, 50));
+      const row1 = store.getRunBilling(c1.runId)!;
+      expect(row1).toMatchObject({ kind: "free", settled: true, credits: 0 });
+      expect(row1.usd).toBeCloseTo(fin1.cost.usd, 9);
+
+      // 第 2 次：免费没了、余额 0 → 拒，连 run.created 都没有
+      await phoneLink.send({ type: "intent.submit", text: "shell: echo two", deviceId: mac.id, mode: "agent" });
+      const err = await phoneLink.expect("error", (m) => m.code === "credits_exhausted");
+      expect(err.message).toContain("免费额度已用完");
+      expect(phoneLink.inbox.filter((m) => m.type === "run.created")).toHaveLength(0);
+
+      // 充值后：按 credits 跑，结束扣 usd × 1000
+      store.addCredits("local", 100, 1_800_000_000);
+      await phoneLink.send({ type: "intent.submit", text: "shell: echo three", deviceId: mac.id, mode: "agent" });
+      const c3 = await phoneLink.expect("run.created");
+      const ask3 = await phoneLink.expect("step.approval_required", (m) => m.runId === c3.runId);
+      await phoneLink.send({ type: "approval.decision", runId: ask3.runId, stepId: ask3.stepId, allow: false, remember: "once" });
+      const fin3 = await phoneLink.expect("run.finished", (m) => m.runId === c3.runId);
+      await new Promise((r) => setTimeout(r, 50));
+      const row3 = store.getRunBilling(c3.runId)!;
+      expect(row3.kind).toBe("credits");
+      expect(row3.settled).toBe(true);
+      expect(row3.credits).toBe(billing.creditsFor(fin3.cost.usd));
+      expect(row3.credits).toBeGreaterThan(0); // mock:paid 有 token 单价，成本不是 0
+      expect(store.getCredits("local")).toBeCloseTo(100 - row3.credits, 6);
+
+      phone.send({ type: "billing.get" });
+      const st = await phone.expect("billing.status");
+      expect(st).toMatchObject({ plan: "paid", freeRunsUsed: 1, freeRunsTotal: 1 });
+      mac.close();
+      phone.close();
+    } finally {
+      srv2.cloudBrain?.stopAll();
+      void srv2.server.stop(true);
+    }
+  }, 30_000);
 
   function url() {
     return srv.url;

@@ -4,6 +4,7 @@
  *          HUB_CLOUD_BRAIN_PROVIDER（设了就开云端大脑，值是默认模型 id）
  */
 import type { Server } from "bun";
+import { billingFromEnv } from "./billing.js";
 import { CloudBrainManager, type CloudBrainOptions } from "./cloud-brain.js";
 import { HubStore } from "./db.js";
 import { Hub, type Conn, type HubOptions } from "./hub.js";
@@ -62,14 +63,17 @@ if (import.meta.main) {
   };
   const port = Number(arg("--port") ?? process.env.HUB_PORT ?? 8788);
   const dbPath = arg("--db") ?? process.env.HUB_DB ?? "hub.db";
+  const store = new HubStore(dbPath);
+  const billing = billingFromEnv(store);
   const { hub, url } = createHubServer({
     port,
-    store: new HubStore(dbPath),
+    store,
     push: pushFromEnv(),
     jwtSecret: process.env.HUB_JWT_SECRET,
     publicURL: process.env.HUB_PUBLIC_URL ?? `ws://localhost:${port}/ws`,
     log: (l) => console.log(`[hub] ${l}`),
-    cloudBrain: process.env.HUB_CLOUD_BRAIN_PROVIDER ? { defaultProvider: process.env.HUB_CLOUD_BRAIN_PROVIDER, log: (r) => console.log(`[brain] ${JSON.stringify(r)}`) } : undefined,
+    billing,
+    cloudBrain: process.env.HUB_CLOUD_BRAIN_PROVIDER ? { defaultProvider: process.env.HUB_CLOUD_BRAIN_PROVIDER, billing, log: (r) => console.log(`[brain] ${JSON.stringify(r)}`) } : undefined,
   });
-  console.log(`[hub] 监听 ${url}  db=${dbPath}  push=${hub.push.kind}  模式=${hub.singleUser ? "单机（不校验 JWT）" : "多账号"}  云端大脑=${process.env.HUB_CLOUD_BRAIN_PROVIDER ?? "关"}`);
+  console.log(`[hub] 监听 ${url}  db=${dbPath}  push=${hub.push.kind}  模式=${hub.singleUser ? "单机（不校验 JWT）" : "多账号"}  云端大脑=${process.env.HUB_CLOUD_BRAIN_PROVIDER ?? "关"}  计费=${billing ? billing.ledger.kind : "关"}`);
 }

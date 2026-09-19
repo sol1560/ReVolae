@@ -12,8 +12,10 @@ export class MockProvider implements Provider {
   readonly info: ModelInfo;
   private calls = 0;
 
+  /** `mock:paid` 按每百万 token 1 美元计价，用来测计费链路；其它 id 免费 */
   constructor(id = "mock") {
-    this.info = { id, tier: "local", zdr: true, vision: false, priceIn: 0, priceOut: 0 };
+    const price = id === "mock:paid" ? 1 : 0;
+    this.info = { id, tier: "local", zdr: true, vision: false, priceIn: price, priceOut: price };
   }
 
   async chat(req: ChatRequest): Promise<ChatResponse> {

@@ -33,7 +33,8 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F3.2 模型设置页 [DONE-orb 部分] 协议：PrivacySettings.cloudModel、ModelEntry、models.list / models.catalog；brain：packages/brain/src/llm/catalog.ts（BUILTIN_MODELS、listModels、probeLocal、tierAccepts、resolveProvider 选错抛错不降级、catalogMessage）；providers.ts 补 ANTHROPIC_ZDR / ZENMUX_ZDR；host-mode 与云端大脑的 intent/learn 都改走 resolveProvider 并响应 models.list；docs/protocol.md「模型设置」节；15 测试。设置页 UI 归 runner B
 - F3.3 密文同步 [DONE-orb 部分] 协议：SyncKind/SyncBlob、sync.put/pull/page/delete（端↔hub）、sync.key（端到端分发密钥）；packages/protocol/src/sync.ts AES-256-GCM sealSync/openSync（AAD 绑 kind|id|deviceId|ts，5 测试）；hub：sync_blobs 表、按 ts 覆盖、seq 游标分页、unclaimed 拒、单块 64 KiB、每类 5000 配额只算新 id（2 端到端测试）；brain：packages/brain/src/sync/history-sync.ts HistorySync push/pull/disable/setKey（4 测试）；docs「云同步」节。Swift/Kotlin 端移植归 runner
 - F3.5 OSC 133 命令块 [DONE-orb 部分] 协议：TerminalBlock（三个偏移量与 terminal.ack 同尺）、terminal.block 事件；brain：packages/brain/src/terminal/osc133.ts Osc133Parser（跨 chunk、BEL/ST、cmd= 或回显抠命令、OSC 7、字节级截尾、块数上限，7 测试）；loop 终端模式先调宿主 terminal.blocks（L0）把最近 5 条命令块放进上下文（1 测试）；shell-integration/cuaremote.{zsh,bash,fish}；docs「终端命令块」节；schema/Swift 已重生成。daemon Swift 解析 + terminal.blocks 工具 + iOS 按块渲染归 runner
-- F3.4 实时画面 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]
+- F3.6 JOC 计费 [DONE-orb 部分] apps/hub/src/billing.ts：CreditLedger 接口 + JocLedger（Bearer、余额/幂等扣款、409=已扣，路径可配）+ LocalLedger（hub credits 表）；Billing：自然月免费次数（默认 50）、免费层 1 台被控设备（只数配过对的）、usd×(1+30%)×100 credit 两位向上取整、run_billing 表按 runId 幂等预占/结算、余额查不到不放行、扣款失败下次重试；CloudBrain 加 billing 钩子（reserve 不过回 credits_exhausted 无 run.created，finally 里 settle 含断线）；hub 处理 billing.get / GET /api/billing / pair.request device_limit；协议 billing.get / billing.status；server 环境变量 HUB_BILLING/JOC_*/HUB_FREE_RUNS…；MockProvider 加 mock:paid 计价；6 测试（含端到端）；docs「计费」节。JOC 真实接口字段未核对（按最小假设写、可配）
+- F3.4 实时画面 · F3.7 App Store 材料 [PENDING]
 
 ## M4 - Android [RUNNING]
 - F4.1 adb 工具 [PENDING]

@@ -7,6 +7,7 @@ import {
   decodeRelay,
   mkMsg,
   parseControl,
+  type Cost,
   type KemKeyPair,
   type MsgBody,
   type PrivacySettings,
@@ -34,6 +35,11 @@ export interface CloudBrainOptions {
   devicePlatform?: (deviceId: string) => string | undefined;
   defaultProvider: string;
   jev?: JevClient;
+  /** 计费钩子（hub 按账号绑好）：reserve 不通过就不开跑；settle 在 run 结束后按实际成本结算 */
+  billing?: {
+    reserve: (runId: string) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+    settle: (runId: string, cost: Cost) => Promise<unknown>;
+  };
   log?: (rec: Record<string, unknown>) => void;
   now?: () => number;
 }
@@ -302,19 +308,34 @@ export class CloudBrain {
     const host = this.agentHostFor(deviceId);
     const ctrl = new AbortController();
     const runId = randomUUID();
+    if (this.o.billing) {
+      const r = await this.o.billing.reserve(runId);
+      if (!r.ok) {
+        await this.sendTo(phoneId, { type: "error", code: r.code, message: r.message, ref: m.id });
+        return;
+      }
+    }
     this.runs.set(runId, { ctrl, phoneId, deviceId });
 
     const { emit, approvals } = this.phoneGate(phoneId);
+    let cost: Cost = { inputTokens: 0, outputTokens: 0, jevTokens: 0, usd: 0 };
+    const emitTracked: typeof emit = (e) => {
+      if ("cost" in e && e.cost) cost = e.cost;
+      emit(e);
+    };
 
     try {
-      await runIntent(
-        { host, provider, policy, approvals, jev: this.jev, emit, log: this.o.log, signal: ctrl.signal, platform: this.o.devicePlatform?.(deviceId) ?? "unknown" },
+      const out = await runIntent(
+        { host, provider, policy, approvals, jev: this.jev, emit: emitTracked, log: this.o.log, signal: ctrl.signal, platform: this.o.devicePlatform?.(deviceId) ?? "unknown" },
         { runId, deviceId, intent: m.text, mode: m.mode, terminalSessionId: m.terminalSessionId },
       );
+      cost = out.cost;
     } catch (e) {
       await this.sendTo(phoneId, { type: "error", code: "run", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {});
     } finally {
       this.runs.delete(runId);
+      // 断线 / 抛错的 run 也按已发生的成本结算；扣款失败只记日志，不影响手机
+      if (this.o.billing) await this.o.billing.settle(runId, cost).catch((e) => this.o.log?.({ t: "billing_settle_failed", runId, err: String(e) }));
     }
   }
 }

@@ -2481,6 +2481,69 @@ public struct SyncDelete: Codable, Sendable {
     }
 }
 
+public struct BillingGet: Codable, Sendable {
+    public static let messageType = "billing.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "billing.get"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public enum BillingStatusPlan: String, Codable, Sendable, CaseIterable {
+    case free = "free"
+    case paid = "paid"
+}
+
+public struct BillingStatus: Codable, Sendable {
+    public static let messageType = "billing.status"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "billing.status"
+    public var plan: BillingStatusPlan
+    public var freeRunsTotal: Int
+    public var freeRunsUsed: Int
+    public var periodEndsAt: Int
+    public var credits: Double
+    public var creditsPerUsd: Double
+    public var freeDeviceLimit: Int
+    public var topUpURL: String?
+
+    public init(id: String, plan: BillingStatusPlan, freeRunsTotal: Int, freeRunsUsed: Int, periodEndsAt: Int, credits: Double, creditsPerUsd: Double, freeDeviceLimit: Int, topUpURL: String? = nil) {
+        self.id = id
+        self.plan = plan
+        self.freeRunsTotal = freeRunsTotal
+        self.freeRunsUsed = freeRunsUsed
+        self.periodEndsAt = periodEndsAt
+        self.credits = credits
+        self.creditsPerUsd = creditsPerUsd
+        self.freeDeviceLimit = freeDeviceLimit
+        self.topUpURL = topUpURL
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case plan
+        case freeRunsTotal
+        case freeRunsUsed
+        case periodEndsAt
+        case credits
+        case creditsPerUsd
+        case freeDeviceLimit
+        case topUpURL
+    }
+}
+
 public struct ToolsList: Codable, Sendable {
     public static let messageType = "tools.list"
     public var v: Int = 1
@@ -2768,6 +2831,8 @@ public enum AnyMessage: Codable, Sendable {
     case syncPull(SyncPull)
     case syncPage(SyncPage)
     case syncDelete(SyncDelete)
+    case billingGet(BillingGet)
+    case billingStatus(BillingStatus)
     case toolsList(ToolsList)
     case toolsListResult(ToolsListResult)
     case toolsCall(ToolsCall)
@@ -2842,6 +2907,8 @@ public enum AnyMessage: Codable, Sendable {
         case .syncPull: return "sync.pull"
         case .syncPage: return "sync.page"
         case .syncDelete: return "sync.delete"
+        case .billingGet: return "billing.get"
+        case .billingStatus: return "billing.status"
         case .toolsList: return "tools.list"
         case .toolsListResult: return "tools.list.result"
         case .toolsCall: return "tools.call"
@@ -2918,6 +2985,8 @@ public enum AnyMessage: Codable, Sendable {
         case "sync.pull": self = .syncPull(try c.decode(SyncPull.self))
         case "sync.page": self = .syncPage(try c.decode(SyncPage.self))
         case "sync.delete": self = .syncDelete(try c.decode(SyncDelete.self))
+        case "billing.get": self = .billingGet(try c.decode(BillingGet.self))
+        case "billing.status": self = .billingStatus(try c.decode(BillingStatus.self))
         case "tools.list": self = .toolsList(try c.decode(ToolsList.self))
         case "tools.list.result": self = .toolsListResult(try c.decode(ToolsListResult.self))
         case "tools.call": self = .toolsCall(try c.decode(ToolsCall.self))
@@ -2995,6 +3064,8 @@ public enum AnyMessage: Codable, Sendable {
         case .syncPull(let v): try c.encode(v)
         case .syncPage(let v): try c.encode(v)
         case .syncDelete(let v): try c.encode(v)
+        case .billingGet(let v): try c.encode(v)
+        case .billingStatus(let v): try c.encode(v)
         case .toolsList(let v): try c.encode(v)
         case .toolsListResult(let v): try c.encode(v)
         case .toolsCall(let v): try c.encode(v)

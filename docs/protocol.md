@@ -188,3 +188,18 @@ iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`�
 大脑 → 宿主：`terminal.blocks` 工具（L0，daemon 实现，只在开了 shell 集成的会话里有意义）。参数 `{sessionId, limit}`，返回 JSON `{blocks: [{blockId, state, command, cwd, exitCode, output}]}`，`output` 是去掉 ANSI 的纯文本尾部（建议 ≤ 8 KiB）。终端模式的大脑在 `intent.submit` 带 `terminalSessionId` 且宿主工具表里有这个工具时，会先调一次，把最近 5 条命令块放进上下文，再看用户意图；宿主没有这个工具就跳过。
 
 解析器参考实现 `packages/brain/src/terminal/osc133.ts`（`Osc133Parser`：`feed(bytes)` 吐出状态变化的块，`recent(n)` 拿最近几块，`plain(block)` 出纯文本），Swift daemon 照这个逻辑实现。shell 集成脚本在 `packages/brain/shell-integration/cuaremote.{zsh,bash,fish}`：daemon 打开会话时设置环境变量 `CUAREMOTE_SESSION=<sessionId>`，用户 rc 文件里按注释加一行 `source`，普通终端里不生效；daemon 安装时可以提议帮用户加这一行（要经用户确认，不能自己改 rc）。
+
+## 计费
+
+只有**云端大脑**跑的 run 计费。本地大脑（Mac daemon 里的 brain）用的是用户自己的 key 或本机模型，hub 看不到成本也不收钱；`usage.report` 只是统计。实现在 `apps/hub/src/billing.ts`。
+
+规则：
+- 免费层：每个自然月（UTC）`HUB_FREE_RUNS`（默认 50）次云端 run；最多绑 `HUB_FREE_DEVICES`（默认 1）台被控设备（只数已和手机配过对的）。
+- 付费层：run 结束后按真实模型成本 `usd × (1 + HUB_MARGIN) × HUB_CREDITS_PER_USD`（默认 30% 加成、1 美元 = 100 credit，两位小数向上取整）扣 credit。
+- run 开始前预占：先占免费次数，没有了看余额，余额 ≤ 0 或查不到余额都不开跑，手机收到 `error{code:"credits_exhausted"}`（`ref` 指向那条 `intent.submit`，不会有 `run.created`）。
+- 一次 run 只扣一次（`run_billing` 表按 runId 幂等）；断线或报错的 run 按已发生的成本结算；扣款失败留着下次重试，不影响手机端。
+- 免费层已满时手机再配一台**新**设备，hub 回 `error{code:"device_limit"}`。
+
+手机 ↔ hub：`billing.get{}` → `billing.status{plan: free|paid, freeRunsTotal, freeRunsUsed, periodEndsAt, credits, creditsPerUsd, freeDeviceLimit, topUpURL?}`；HTTP `GET /api/billing` 同一份。没开计费的 hub 回 `error{code:"billing_disabled"}`。
+
+credit 账本：`HUB_BILLING=joc` 用 JustOne Connector（`JOC_BASE_URL` / `JOC_API_KEY` / `JOC_TOPUP_URL`，路径默认 `/api/credits/balance` 与 `/api/credits/charge`，可用 `JOC_BALANCE_PATH` / `JOC_CHARGE_PATH` 改）。接口按「查余额 + 幂等扣款」的最小假设：`GET …/balance?account=` 回 `{credits}`；`POST …/charge {account, credits, ref, memo}` 回 `{credits}`，同 `ref` 再扣回 409 视为已扣。`HUB_BILLING=local` 用 hub 自己的 `credits` 表（开发 / 自建，`store.addCredits` 充值）。不设 = 关。

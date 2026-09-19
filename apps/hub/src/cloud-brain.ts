@@ -1,12 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { CloudBrain, JevClient } from "@cuaremote/brain";
 import { deriveKemKeyPair, generateSigningKeyPair, type PublicKeys } from "@cuaremote/protocol";
+import type { Billing } from "./billing.js";
 import type { Hub } from "./hub.js";
 
 export interface CloudBrainOptions {
   /** 手机没指定 provider 时用的模型，如 "anthropic:claude-fable-5.1" */
   defaultProvider: string;
   jev?: JevClient;
+  /** 云端 run 的计费；不给 = 不限量 */
+  billing?: Billing;
   log?: (rec: Record<string, unknown>) => void;
 }
 
@@ -80,6 +83,12 @@ export class CloudBrainManager {
       sendRelay: (bytes) => attached?.send(bytes),
       defaultProvider: this.o.defaultProvider,
       jev: this.o.jev,
+      billing: this.o.billing
+        ? {
+            reserve: (runId) => this.o.billing!.reserve(accountId, runId),
+            settle: (runId, cost) => this.o.billing!.settle(accountId, runId, cost),
+          }
+        : undefined,
       log: this.o.log,
     });
     attached = this.hub.attachEndpoint({

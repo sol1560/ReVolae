@@ -3575,6 +3575,94 @@
         },
         "type": {
           "type": "string",
+          "const": "billing.get"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "billing.status"
+        },
+        "plan": {
+          "type": "string",
+          "enum": [
+            "free",
+            "paid"
+          ]
+        },
+        "freeRunsTotal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "freeRunsUsed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "periodEndsAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "credits": {
+          "type": "number"
+        },
+        "creditsPerUsd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "freeDeviceLimit": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "topUpURL": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "plan",
+        "freeRunsTotal",
+        "freeRunsUsed",
+        "periodEndsAt",
+        "credits",
+        "creditsPerUsd",
+        "freeDeviceLimit"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "tools.list"
         }
       },

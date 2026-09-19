@@ -27,6 +27,7 @@ import {
 import { newNonce, newPairCode, newSessionToken, verifyJwt } from "./auth.js";
 import { HubStore, type DeviceRow, type Role } from "./db.js";
 import { DryRunPush, type PushSender } from "./push.js";
+import type { Billing } from "./billing.js";
 
 export interface Conn {
   send(data: string | Uint8Array): void;
@@ -59,6 +60,8 @@ export interface HubOptions {
   log?: (line: string) => void;
   /** 每个账号每类云同步密文块的条数上限（默认 5000） */
   syncQuotaPerKind?: number;
+  /** 计费（免费额度 / credit）；不给 = 不限量、billing.get 回 billing_disabled */
+  billing?: Billing;
   /** 某个端登录成功 / 掉线（云端大脑管理器靠这个按账号起大脑、清理掉线设备） */
   onPresence?: (ev: { deviceId: string; role: Role; accountId: string; platform: string; online: boolean }) => void;
 }
@@ -231,7 +234,9 @@ export class Hub {
         this.store.addUsage({ accountId: s.accountId!, deviceId: s.deviceId!, runId: m.runId, cost: m.cost, steps: m.steps, jevCalls: m.jevCalls }, this.now());
         return this.reply(s, { type: "ack", ref: m.id });
       case "pair.request":
-        return this.onPairRequest(s, m);
+        return void this.onPairRequest(s, m);
+      case "billing.get":
+        return void this.onBillingGet(s, m);
       case "pair.confirm":
         return this.onPairConfirm(s, m);
       case "pair.code.claim":
@@ -345,13 +350,27 @@ export class Hub {
 
   // ───────────────────────── 配对 ─────────────────────────
 
-  private onPairRequest(s: Session, m: Extract<HubMessage, { type: "pair.request" }>) {
+  private async onBillingGet(s: Session, m: Extract<HubMessage, { type: "billing.get" }>) {
+    if (!this.o.billing) return this.fail(s, "billing_disabled", "这个 hub 没开计费", m.id);
+    if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号", m.id);
+    try {
+      this.reply(s, await this.o.billing.status(s.accountId!));
+    } catch (e) {
+      this.fail(s, "billing_unavailable", e instanceof Error ? e.message : String(e), m.id);
+    }
+  }
+
+  private async onPairRequest(s: Session, m: Extract<HubMessage, { type: "pair.request" }>) {
     if (s.role !== "phone") return this.fail(s, "not_allowed", "只有手机能发起配对", m.id);
     if (m.phoneId !== s.deviceId) return this.fail(s, "id_mismatch", "phoneId 必须是你自己", m.id);
     if (s.accountId === UNCLAIMED) return this.fail(s, "token_required", "先登录账号", m.id);
     const device = this.online.get(m.deviceId);
     if (!device || device.role !== "device") return this.fail(s, "peer_offline", `${m.deviceId} 不在线，配对时两边都得在线`, m.id);
     if (device.accountId !== UNCLAIMED && device.accountId !== s.accountId) return this.fail(s, "account_mismatch", "这台设备属于别的账号", m.id);
+    // 免费层设备数上限：只拦第一次进账号的设备（已和账号里任一手机配过对的不算新）
+    if (this.o.billing && this.store.peersOf(m.deviceId).length === 0 && !(await this.o.billing.canAddDevice(s.accountId!)))
+      return this.fail(s, "device_limit", `免费层最多绑 ${this.o.billing.freeDeviceLimit} 台被控设备，充值后可以再加`, m.id);
+    if (!this.online.get(m.deviceId)) return this.fail(s, "peer_offline", `${m.deviceId} 掉线了`, m.id);
     this.pendingPairs.set(pairKey(m.deviceId, m.phoneId), { phoneId: m.phoneId, phoneName: m.phoneName, phonePubKeys: m.phonePubKeys, phoneAccount: s.accountId!, at: this.now() });
     // 原样转给设备：HMAC 由设备自己用二维码里的 secret 验，hub 不知道 secret
     device.conn.send(JSON.stringify(m));
@@ -472,6 +491,10 @@ export class Hub {
     if (url.pathname === "/api/devices" && req.method === "GET") {
       const devices = this.store.listAccountDevices(who.accountId).map((d) => ({ ...d, online: this.online.has(d.deviceId), paired: this.store.isPaired(who.deviceId, d.deviceId) }));
       return Response.json({ devices });
+    }
+    if (url.pathname === "/api/billing" && req.method === "GET") {
+      if (!this.o.billing) return Response.json({ error: "billing_disabled" }, { status: 404 });
+      return Response.json(await this.o.billing.status(who.accountId));
     }
     if (url.pathname === "/api/usage" && req.method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);

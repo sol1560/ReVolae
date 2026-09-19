@@ -120,6 +120,22 @@ CREATE TABLE IF NOT EXISTS sync_blobs (
   UNIQUE(account_id, kind, id)
 );
 CREATE INDEX IF NOT EXISTS sync_blobs_account_kind_seq ON sync_blobs(account_id, kind, seq);
+CREATE TABLE IF NOT EXISTS run_billing (
+  run_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  credits REAL NOT NULL DEFAULT 0,
+  usd REAL NOT NULL DEFAULT 0,
+  settled INTEGER NOT NULL DEFAULT 0,
+  reserved_at INTEGER NOT NULL,
+  settled_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS run_billing_account_at ON run_billing(account_id, reserved_at);
+CREATE TABLE IF NOT EXISTS credits (
+  account_id TEXT PRIMARY KEY,
+  credits REAL NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS brain_keys (
   account_id TEXT PRIMARY KEY,
   kem_seed TEXT NOT NULL,
@@ -129,6 +145,18 @@ CREATE TABLE IF NOT EXISTS brain_keys (
   created_at INTEGER NOT NULL
 );
 `;
+
+export interface RunBillingRow {
+  runId: string;
+  accountId: string;
+  /** free = 占本月免费次数；credits = 结束后按成本扣 credit */
+  kind: "free" | "credits";
+  credits: number;
+  usd: number;
+  settled: boolean;
+  reservedAt: number;
+  settledAt?: number;
+}
 
 /** 云端大脑的长期密钥（每个账号一套，base64） */
 export interface BrainKeyRow {
@@ -251,6 +279,41 @@ export class HubStore {
         detail: (r.detail as string | null) ?? null,
         createdAt: r.created_at as number,
       }));
+  }
+
+  // ── 计费 ──
+  /** 本账号在 [since, now) 里占用了几次免费额度 */
+  freeRunsSince(accountId: string, since: number): number {
+    return this.db.query<{ n: number }, [string, number]>("SELECT COUNT(*) AS n FROM run_billing WHERE account_id = ? AND kind = 'free' AND reserved_at >= ?").get(accountId, since)!.n;
+  }
+
+  getRunBilling(runId: string): RunBillingRow | undefined {
+    const r = this.db.query<Record<string, unknown>, [string]>("SELECT * FROM run_billing WHERE run_id = ?").get(runId);
+    if (!r) return undefined;
+    return { runId: r.run_id as string, accountId: r.account_id as string, kind: r.kind as RunBillingRow["kind"], credits: r.credits as number, usd: r.usd as number, settled: Boolean(r.settled), reservedAt: r.reserved_at as number, settledAt: (r.settled_at as number | null) ?? undefined };
+  }
+
+  /** 预占：同一 runId 重复预占直接返回已有记录 */
+  reserveRun(r: { runId: string; accountId: string; kind: RunBillingRow["kind"] }, now: number): RunBillingRow {
+    this.db.query("INSERT OR IGNORE INTO run_billing (run_id, account_id, kind, reserved_at) VALUES (?, ?, ?, ?)").run(r.runId, r.accountId, r.kind, now);
+    return this.getRunBilling(r.runId)!;
+  }
+
+  settleRun(runId: string, credits: number, usd: number, now: number) {
+    this.db.query("UPDATE run_billing SET credits = ?, usd = ?, settled = 1, settled_at = ? WHERE run_id = ?").run(credits, usd, now, runId);
+  }
+
+  /** 本地 credit 账本（没接外部计费系统时用） */
+  getCredits(accountId: string): number {
+    return this.db.query<{ credits: number }, [string]>("SELECT credits FROM credits WHERE account_id = ?").get(accountId)?.credits ?? 0;
+  }
+
+  /** delta 可正可负；返回变动后余额 */
+  addCredits(accountId: string, delta: number, now: number): number {
+    this.db
+      .query("INSERT INTO credits (account_id, credits, updated_at) VALUES (?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET credits = credits + excluded.credits, updated_at = excluded.updated_at")
+      .run(accountId, delta, now);
+    return this.getCredits(accountId);
   }
 
   // ── usage ──

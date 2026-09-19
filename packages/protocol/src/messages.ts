@@ -220,6 +220,27 @@ export const SyncPull = msg("sync.pull", { kind: SyncKind, cursor: z.string().op
 export const SyncPage = msg("sync.page", { kind: SyncKind, items: z.array(SyncBlob), cursor: z.string().optional(), more: z.boolean() });
 /** 删指定 id；不带 ids = 把这个账号这一类全部抹掉（关掉同步开关时用） */
 export const SyncDelete = msg("sync.delete", { kind: SyncKind, ids: z.array(z.string()).max(500).optional() });
+/** 手机问 hub 自己的套餐和余额 */
+export const BillingGet = msg("billing.get", {});
+/**
+ * plan：free = 只用每月免费次数；paid = 有 credit 余额。
+ * 只有云端大脑跑的 run 计费；本地大脑（用户自己的 key）不计。
+ */
+export const BillingStatus = msg("billing.status", {
+  plan: z.enum(["free", "paid"]),
+  freeRunsTotal: z.number().int().nonnegative(),
+  freeRunsUsed: z.number().int().nonnegative(),
+  /** 本月免费额度重置时间（Unix 秒） */
+  periodEndsAt: z.number().int(),
+  /** credit 余额；没接计费系统时为 0 */
+  credits: z.number(),
+  /** 1 美元模型成本（含加成）折多少 credit */
+  creditsPerUsd: z.number().positive(),
+  /** 免费层最多绑几台被控设备 */
+  freeDeviceLimit: z.number().int().positive(),
+  /** 充值页（手机用系统浏览器打开） */
+  topUpURL: z.string().optional(),
+});
 /** 端到端分发同步密钥（手机 ↔ 设备，走加密链路；hub 永远见不到） */
 export const SyncKey = msg("sync.key", { keyId: z.string().min(1).max(64), /** base64 32 字节 */ key: z.string() });
 
@@ -284,7 +305,7 @@ export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
 export const HubMessage = z.discriminatedUnion("type", [
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, ErrorMsg, Ack,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus, ErrorMsg, Ack,
 ]);
 export type HubMessage = z.infer<typeof HubMessage>;
 
@@ -311,7 +332,7 @@ export const AllMessages = {
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus,
   ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,
 } as const;
 
