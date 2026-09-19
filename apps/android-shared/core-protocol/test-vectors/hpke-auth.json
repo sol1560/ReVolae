@@ -1,0 +1,15 @@
+{
+    "suite": "DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/ChaCha20-Poly1305",
+    "mode": "auth",
+    "from": "android-phone",
+    "to": "android-host",
+    "info": "Y3VhcmVtb3RlLXYxfGFuZHJvaWQtcGhvbmV8YW5kcm9pZC1ob3N0",
+    "senderPrivate": "kPekZ99O+XBT7CpHtuYZ9jLflUe7AJ/QvMdHkJ8be1Q=",
+    "senderPublic": "sfG4QN56MkGwJ0jPmwW3TcjF6EUSmHOIF712qo6+jCs=",
+    "recipientPrivate": "OKphvBPlZHPpE6hcM89NYDrJmlF+6pXtRXPncrZENXc=",
+    "recipientPublic": "aTZYJUYw9zrY2nj7Mxv5ds1C+Q4OnJ6D9AxRBypvdBc=",
+    "enc": "MOUuAJgsWTScGvNFgWeESAA4PGvzTngvLcANQBw9tDg=",
+    "aad": "AQxhbmRyb2lkLWhvc3QNYW5kcm9pZC1waG9uZQE=",
+    "plaintext": "Zmlyc3QtZnJhbWU=",
+    "ciphertext": "Q9EDPlx0gTGQaeduVhe0L6b3JW/HSXAxIKe1"
+}

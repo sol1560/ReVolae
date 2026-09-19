@@ -15,3 +15,10 @@
 - ESP32-S3 C 固件在 orb 里没有 idf.py，也没有板子：未编译、未烧录、未在 iPad 上枚举过。需要真板验证 NCM+HID 复合枚举、DHCP、15ms 时序、供电。
 - 绝对坐标 HID（USB touchscreen digitizer）能否被 iPadOS 当系统触摸接受：没有可靠官方证据，暂不能替代相对增量 + 校准。
 - 该线程替用户做的决定：主控选 ESP32-S3-DevKitC-1 N8R8（CircuitPython usb_cdc 只有串口，做不了 NCM）；RP2040 降为 HID+串口 JSON 备用；键鼠合一个 HID 接口两个 Report ID；固定地址 172.31.254.1/29；Unicode 走 iPad app 写剪贴板 + Cmd+V。
+
+## Android（F4.2/F4.3，回收自 T-01a0b9e0）
+- HPKE 互通已交叉验证：Android 生成的 test-vectors/hpke-auth.json 在 TS OpenContext 里解出 "first-frame"，aad 与 TS relayHeader 字节一致。
+- 我改了 daemon 的 hub 登录签名：原来签裸 nonce，改为签 hubAuthPayload(deviceId, nonce)（Frames.kt 新增函数、HubConnection.kt 调用、ProtocolTest 加断言）。本 orb 没有 JDK/Android SDK，这三处改动没跑 gradle，需在 Mac 上 `./gradlew :apps:android-shared:core-protocol:test` 复核。
+- 控制端 UI 是本地假状态，没接 WebSocket、没发真实 pair.request；hub 现已定稿（docs/protocol.md「hub 登录与中继」），需要一轮接线。
+- 该线程替用户做的决定：Gradle 9.6 / AGP 9.4 / Kotlin 2.4.20 / compile 37 / min 29；BouncyCastle 1.81 做 HPKE；X25519 由 BC 管、P-256 由 Android Keystore 管；只给 Android 实际处理的消息建强类型，其余控制帧原样转发。
+- 需要真机：无障碍/通知使用权/录屏授权、各厂商后台保活、指纹。

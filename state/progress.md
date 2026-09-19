@@ -31,5 +31,8 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 ## M3 - 产品化 [PENDING]
 - F3.1 语音（runner B）· F3.2 模型设置页 · F3.3 密文同步 · F3.4 实时画面 · F3.5 OSC 133 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]
 
-## M4 - Android [PENDING]
-- F4.1 adb 工具 · F4.2 android-daemon · F4.3 android 控制端 · F4.4 多设备 [PENDING]
+## M4 - Android [RUNNING]
+- F4.1 adb 工具 [PENDING]
+- F4.2 android-daemon [DONE] 已回收：无障碍/MediaProjection/十个 android.* 工具/HPKE/审批验签（gradle test 在源线程通过；orb 无 JDK 未复跑）
+- F4.3 android 控制端 [DONE-部分] Compose UI 全页面就位，但状态层还是本地假数据、未接真实 WebSocket/pair.request
+- F4.4 多设备 [PENDING]

@@ -18,3 +18,5 @@ apps/android*/**/build/
 __pycache__/
 .amp/in/
 .amp/portals/
+.amp/*.tgz
+.amp/*.tar.gz
