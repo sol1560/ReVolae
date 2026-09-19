@@ -97,6 +97,42 @@ describe("agent loop（mock 模型 + 本地宿主）", () => {
     expect(types(events)).not.toContain("step.finished");
   });
 
+  test("终端模式：宿主有 terminal.blocks 时，最近命令块先进上下文；没有会话 id 或没有这个工具时不调", async () => {
+    const calls: { tool: string; args: Record<string, unknown> }[] = [];
+    const seen: string[] = [];
+    const blocksTool = { name: "terminal.blocks", description: "最近命令块", channel: "terminal" as const, staticLevel: 0 as const, costClass: 0 as const, dataLeavesDevice: true, inputSchema: {} };
+    const fakeHost = {
+      listTools: async () => ({ tools: [blocksTool], scope: { allowedDirs: [], allowedApps: [], deniedCommands: [] } }),
+      call: async (tool: string, args: Record<string, unknown>) => {
+        calls.push({ tool, args });
+        return { ok: true, ms: 1, attachments: [], output: JSON.stringify({ blocks: [
+          { blockId: 1, state: "done", command: "git status", cwd: "/w", exitCode: 0, output: "On branch main" },
+          { blockId: 2, state: "done", command: "bun test", cwd: "/w", exitCode: 1, output: "x".repeat(2000) + "\n1 fail" },
+          { blockId: 3, state: "prompt" },
+        ] }) };
+      },
+    };
+    const spy = new MockProvider();
+    const orig = spy.chat.bind(spy);
+    spy.chat = async (req) => { seen.push(...req.messages.filter((m) => m.role === "user").map((m) => (m.content as { type: string; text?: string }[]).map((c) => c.text ?? "").join(""))); return orig(req); };
+    const deps = { host: fakeHost, provider: spy, policy: new PolicyEngine({ jevEnabled: false, autonomy: "balanced" as const }), approvals: { request: async () => ({ allow: true, remember: "once" as const }) }, emit: () => {} };
+    await runIntent(deps, { deviceId: "d", intent: "为什么测试挂了", mode: "terminal", terminalSessionId: "t9" });
+    expect(calls[0]).toEqual({ tool: "terminal.blocks", args: { sessionId: "t9", limit: 5 } });
+    const ctx = seen[0]!;
+    expect(ctx).toContain("$ git status");
+    expect(ctx).toContain("[退出码 1]");
+    expect(ctx).toContain("1 fail");
+    expect(ctx).not.toContain("x".repeat(1600)); // 长输出只留尾部
+    expect(ctx.indexOf("git status")).toBeLessThan(ctx.indexOf("bun test")); // 从旧到新
+    expect(seen[1]).toBe("意图：为什么测试挂了"); // 意图在命令块之后
+
+    calls.length = 0;
+    await runIntent(deps, { deviceId: "d", intent: "x", mode: "terminal" });
+    expect(calls).toHaveLength(0);
+    await runIntent(deps, { deviceId: "d", intent: "x", mode: "agent", terminalSessionId: "t9" });
+    expect(calls).toHaveLength(0);
+  });
+
   test("取消：signal abort 后下一轮结束，cancelled=true", async () => {
     const { deps } = setup("handsoff");
     const ctrl = new AbortController();

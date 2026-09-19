@@ -19,6 +19,7 @@ import {
   Shortcut,
   SyncBlob,
   SyncKind,
+  TerminalBlock,
   ToolDescriptor,
   Verdict,
 } from "./common.js";
@@ -145,6 +146,8 @@ export const TerminalSuggestion = msg("terminal.suggestion", {
 });
 export const TerminalOpened = msg("terminal.opened", { sessionId: z.string(), pid: z.number().int().optional() });
 export const TerminalExit = msg("terminal.exit", { sessionId: z.string(), code: z.number().int().optional() });
+/** 命令块状态变化（prompt → running → done），daemon 解析 OSC 133 后发；每次变化发整块 */
+export const TerminalBlockMsg = msg("terminal.block", { block: TerminalBlock });
 export const MediaInfo = msg("media.info", {
   width: z.number().int(),
   height: z.number().int(),
@@ -274,7 +277,7 @@ export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
 
 export const DeviceToPhone = z.discriminatedUnion("type", [
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
-  TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, MediaInfo, Stats, Capabilities, PrivacyState,
+  TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, SyncKey, ErrorMsg, Ack,
 ]);
 export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
@@ -305,7 +308,7 @@ export const AllMessages = {
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
   AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
-  TerminalSuggestion, TerminalOpened, TerminalExit, MediaInfo, Stats, Capabilities, PrivacyState,
+  TerminalSuggestion, TerminalOpened, TerminalExit, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
   PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, SyncPut, SyncPull, SyncPage, SyncDelete,

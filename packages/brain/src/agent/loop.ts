@@ -64,6 +64,40 @@ const PLAN_TOOL: ToolSpec = {
     required: ["steps"],
   },
 };
+/** daemon 侧实现的 L0 工具：返回终端会话最近的命令块（见 docs/protocol.md「终端命令块」） */
+export const TERMINAL_BLOCKS_TOOL = "terminal.blocks";
+const RECENT_BLOCKS = 5;
+const BLOCK_OUTPUT_CHARS = 1500;
+
+interface BlockSummary { blockId?: number; state?: string; command?: string; cwd?: string; exitCode?: number; output?: string }
+
+/** 把 terminal.blocks 的结果整理成一段给模型看的文字；宿主没返回有效内容时给 undefined */
+export async function recentBlocksContext(host: Host, sessionId: string): Promise<string | undefined> {
+  let res: ToolResult;
+  try {
+    res = await host.call(TERMINAL_BLOCKS_TOOL, { sessionId, limit: RECENT_BLOCKS }, 3000);
+  } catch {
+    return undefined;
+  }
+  if (!res.ok || !res.output) return undefined;
+  let blocks: BlockSummary[];
+  try {
+    const parsed = JSON.parse(res.output) as unknown;
+    blocks = Array.isArray(parsed) ? (parsed as BlockSummary[]) : ((parsed as { blocks?: BlockSummary[] }).blocks ?? []);
+  } catch {
+    return undefined;
+  }
+  const done = blocks.filter((b) => b.command && b.state !== "prompt").slice(-RECENT_BLOCKS);
+  if (done.length === 0) return undefined;
+  const lines = done.map((b) => {
+    const head = `$ ${b.command}` + (b.cwd ? `   (目录 ${b.cwd})` : "") + (b.state === "running" ? "   [还在运行]" : b.exitCode !== undefined ? `   [退出码 ${b.exitCode}]` : "");
+    const out = (b.output ?? "").trim();
+    const tail = out.length > BLOCK_OUTPUT_CHARS ? "…" + out.slice(-BLOCK_OUTPUT_CHARS) : out;
+    return tail ? `${head}\n${tail}` : head;
+  });
+  return `用户终端里最近执行的命令和输出（从旧到新）：\n\n${lines.join("\n\n")}`;
+}
+
 const TERMINAL_TOOL: ToolSpec = {
   name: "propose_command",
   description: "终端模式：建议一条命令给用户，不执行。",
@@ -99,8 +133,13 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
 
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt({ platform: deps.platform ?? process.platform, tools: allTools, scope, mode: input.mode, hasGui: guiTools.length > 0, hasJevAx }) },
-    { role: "user", content: [{ type: "text", text: `意图：${input.intent}` }] },
   ];
+  // 终端模式：宿主如果会分块（shell 集成 + terminal.blocks 工具），先把最近几条命令和输出喂给模型
+  if (input.mode === "terminal" && input.terminalSessionId && byName.has(TERMINAL_BLOCKS_TOOL)) {
+    const ctx = await recentBlocksContext(deps.host, input.terminalSessionId);
+    if (ctx) messages.push({ role: "user", content: [{ type: "text", text: ctx }] });
+  }
+  messages.push({ role: "user", content: [{ type: "text", text: `意图：${input.intent}` }] });
 
   const addUsage = (u: { inputTokens: number; outputTokens: number }) => {
     cost.inputTokens += u.inputTokens;

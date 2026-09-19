@@ -168,3 +168,23 @@ iPad app 在 `tools.list.result` 里要报这些工具（platform 填 `ipados`�
 - `sync.delete{kind, ids?}`：删指定 id；不带 ids 抹掉该账号这一类全部（关掉开关时端要发这个）。没有墓碑：别的端已经拉走的本地副本不受影响。
 
 历史同步的端侧逻辑（参考实现 `packages/brain/src/sync/history-sync.ts`，Swift / Kotlin 照抄）：只传已结束的 run（有 `finishedAt`），本地 `finishedAt` 变新才重传；谁手里有明文谁传——本地大脑的 run 由设备传，云端大脑的 run 由手机传；拉取按游标增量、解不开的块跳过计数、合并时 `finishedAt` 大的赢、拉回来的不再回传；关掉开关 → `sync.delete` 整类 + 清空「已上传」记录。持久化 `{uploaded: runId→finishedAt, cursor}`。
+
+## 终端命令块
+
+终端会话（`terminal.open` / `terminal.data`）里的字节流原本是一整条，手机端只能当成一个滚动屏幕看。命令块把它按「一条命令 = 一块」切开：手机上可以按块折叠、复制、分享，终端模式问大脑「刚才为什么报错」时大脑也能直接看到最近几条命令和输出，而不是整屏字符。
+
+切分靠 shell 发的 OSC 133 标记（和 iTerm2 / WezTerm / Warp 同一套）：
+- `ESC ] 133 ; A BEL`：提示符开始（上一块没收到 D 也在这里收尾，比如被 Ctrl-C 打断）；
+- `ESC ] 133 ; B BEL`：提示符画完，用户开始输入；
+- `ESC ] 133 ; C ; cmd=<百分号编码的命令> BEL`：命令开始执行。`cmd=` 是我们自己加的参数，标准里没有；没有它时从 B→C 之间的回显里抠命令（会处理退格和颜色码）；
+- `ESC ] 133 ; D ; <退出码> BEL`：命令结束；
+- `ESC ] 7 ; file://host/path BEL`：当前目录。
+终止符 BEL 或 `ESC \` 都认，序列被切成两个 `terminal.data` 也能拼回来。
+
+`TerminalBlock`：`sessionId` / `blockId`（会话内递增）/ `state`（`prompt` / `running` / `done`）/ `command` / `cwd` / `exitCode` / `startedAt` / `finishedAt` / `startOffset` / `outputOffset` / `endOffset`。三个偏移量是**从会话开始累计的字节数**，和 `terminal.ack.bytes` 同一把尺，手机端用它在自己的环形缓冲里定位这块对应的字节，所以块本身不带输出内容（`terminal.data` 已经送过一遍）。
+
+设备 → 手机：`terminal.block{block}`，块状态每变一次发一条（prompt → running → done）。同一 `blockId` 以最后一条为准。
+
+大脑 → 宿主：`terminal.blocks` 工具（L0，daemon 实现，只在开了 shell 集成的会话里有意义）。参数 `{sessionId, limit}`，返回 JSON `{blocks: [{blockId, state, command, cwd, exitCode, output}]}`，`output` 是去掉 ANSI 的纯文本尾部（建议 ≤ 8 KiB）。终端模式的大脑在 `intent.submit` 带 `terminalSessionId` 且宿主工具表里有这个工具时，会先调一次，把最近 5 条命令块放进上下文，再看用户意图；宿主没有这个工具就跳过。
+
+解析器参考实现 `packages/brain/src/terminal/osc133.ts`（`Osc133Parser`：`feed(bytes)` 吐出状态变化的块，`recent(n)` 拿最近几块，`plain(block)` 出纯文本），Swift daemon 照这个逻辑实现。shell 集成脚本在 `packages/brain/shell-integration/cuaremote.{zsh,bash,fish}`：daemon 打开会话时设置环境变量 `CUAREMOTE_SESSION=<sessionId>`，用户 rc 文件里按注释加一行 `source`，普通终端里不生效；daemon 安装时可以提议帮用户加这一行（要经用户确认，不能自己改 rc）。

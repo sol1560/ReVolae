@@ -697,6 +697,54 @@ public struct SyncBlob: Codable, Sendable {
     }
 }
 
+public enum TerminalBlockState: String, Codable, Sendable, CaseIterable {
+    case prompt = "prompt"
+    case running = "running"
+    case done = "done"
+}
+
+public struct TerminalBlock: Codable, Sendable {
+    public var sessionId: String
+    public var blockId: Int
+    public var state: TerminalBlockState
+    public var command: String?
+    public var cwd: String?
+    public var exitCode: Int?
+    public var startedAt: Int
+    public var finishedAt: Int?
+    public var startOffset: Int
+    public var outputOffset: Int?
+    public var endOffset: Int?
+
+    public init(sessionId: String, blockId: Int, state: TerminalBlockState, command: String? = nil, cwd: String? = nil, exitCode: Int? = nil, startedAt: Int, finishedAt: Int? = nil, startOffset: Int, outputOffset: Int? = nil, endOffset: Int? = nil) {
+        self.sessionId = sessionId
+        self.blockId = blockId
+        self.state = state
+        self.command = command
+        self.cwd = cwd
+        self.exitCode = exitCode
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.startOffset = startOffset
+        self.outputOffset = outputOffset
+        self.endOffset = endOffset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId
+        case blockId
+        case state
+        case command
+        case cwd
+        case exitCode
+        case startedAt
+        case finishedAt
+        case startOffset
+        case outputOffset
+        case endOffset
+    }
+}
+
 public enum ToolDescriptorCostClass: Int, Codable, Sendable, CaseIterable, Comparable {
     case l0 = 0
     case l1 = 1
@@ -1602,6 +1650,26 @@ public struct TerminalExit: Codable, Sendable {
         case `type`
         case sessionId
         case code
+    }
+}
+
+public struct TerminalBlockMsg: Codable, Sendable {
+    public static let messageType = "terminal.block"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "terminal.block"
+    public var block: TerminalBlock
+
+    public init(id: String, block: TerminalBlock) {
+        self.id = id
+        self.block = block
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case block
     }
 }
 
@@ -2670,6 +2738,7 @@ public enum AnyMessage: Codable, Sendable {
     case terminalSuggestion(TerminalSuggestion)
     case terminalOpened(TerminalOpened)
     case terminalExit(TerminalExit)
+    case terminalBlockMsg(TerminalBlockMsg)
     case mediaInfo(MediaInfo)
     case stats(Stats)
     case capabilities(Capabilities)
@@ -2743,6 +2812,7 @@ public enum AnyMessage: Codable, Sendable {
         case .terminalSuggestion: return "terminal.suggestion"
         case .terminalOpened: return "terminal.opened"
         case .terminalExit: return "terminal.exit"
+        case .terminalBlockMsg: return "terminal.block"
         case .mediaInfo: return "media.info"
         case .stats: return "stats"
         case .capabilities: return "capabilities"
@@ -2818,6 +2888,7 @@ public enum AnyMessage: Codable, Sendable {
         case "terminal.suggestion": self = .terminalSuggestion(try c.decode(TerminalSuggestion.self))
         case "terminal.opened": self = .terminalOpened(try c.decode(TerminalOpened.self))
         case "terminal.exit": self = .terminalExit(try c.decode(TerminalExit.self))
+        case "terminal.block": self = .terminalBlockMsg(try c.decode(TerminalBlockMsg.self))
         case "media.info": self = .mediaInfo(try c.decode(MediaInfo.self))
         case "stats": self = .stats(try c.decode(Stats.self))
         case "capabilities": self = .capabilities(try c.decode(Capabilities.self))
@@ -2894,6 +2965,7 @@ public enum AnyMessage: Codable, Sendable {
         case .terminalSuggestion(let v): try c.encode(v)
         case .terminalOpened(let v): try c.encode(v)
         case .terminalExit(let v): try c.encode(v)
+        case .terminalBlockMsg(let v): try c.encode(v)
         case .mediaInfo(let v): try c.encode(v)
         case .stats(let v): try c.encode(v)
         case .capabilities(let v): try c.encode(v)

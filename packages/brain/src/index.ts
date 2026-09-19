@@ -9,7 +9,7 @@ export { PolicyEngine, staticLevel, actionFingerprint, type PolicyDecision, type
 export { CuaDriver, GUI_WHITELIST } from "./gui/cua-driver.js";
 export { jevAxDecide, toCuaCall, TARGET_CONFIDENCE_FLOOR } from "./gui/jev-ax.js";
 export { McpStdioClient } from "./gui/mcp-stdio-client.js";
-export { runIntent, describe, type AgentDeps, type ApprovalGate, type ApprovalRequest, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
+export { runIntent, describe, recentBlocksContext, TERMINAL_BLOCKS_TOOL, type AgentDeps, type ApprovalGate, type ApprovalRequest, type RunInput, type RunOutcome, type BrainEvent } from "./agent/loop.js";
 export { runHostMode } from "./host-mode.js";
 export { JsonlLog } from "./log.js";
 export { RelayHost } from "./host/relay-host.js";
@@ -20,3 +20,4 @@ export { validateCards, renderTemplate, escapeFor, toolArgs, placeholders, CARD_
 export { IpadHost, IPAD_TOOLS, IPAD_DEVICE_TOOLS, hasIpadTools, wrapIfIpad, CALIBRATION_MAGNITUDES } from "./ipad/ipad-host.js";
 export { listModels, probeLocal, resolveProvider, tierAccepts, catalogMessage, BUILTIN_MODELS } from "./llm/catalog.js";
 export { HistorySync, type HistoryStore, type HistorySyncState, type HistorySyncDeps, type PushResult, type PullResult } from "./sync/history-sync.js";
+export { Osc133Parser, stripAnsi } from "./terminal/osc133.js";

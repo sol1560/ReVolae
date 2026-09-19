@@ -277,6 +277,29 @@ export const SyncBlob = z.object({
 });
 export type SyncBlob = z.infer<typeof SyncBlob>;
 
+/**
+ * 终端命令块（OSC 133）：一条命令 + 输出 + 退出码。
+ * 偏移量是该会话 PTY 流的累计字节数（和 terminal.ack 同一把尺子），手机据此在自己的缓冲里画块边界。
+ */
+export const TerminalBlock = z.object({
+  sessionId: z.string(),
+  /** 会话内递增 */
+  blockId: z.number().int().positive(),
+  state: z.enum(["prompt", "running", "done"]),
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  startedAt: z.number().int(),
+  finishedAt: z.number().int().optional(),
+  /** 提示符开始处 */
+  startOffset: z.number().int().nonnegative(),
+  /** 命令开始执行处（输出从这里起） */
+  outputOffset: z.number().int().nonnegative().optional(),
+  /** 命令结束处 */
+  endOffset: z.number().int().nonnegative().optional(),
+});
+export type TerminalBlock = z.infer<typeof TerminalBlock>;
+
 export const DeviceStats = z.object({
   batteryPercent: z.number().optional(),
   charging: z.boolean().optional(),
