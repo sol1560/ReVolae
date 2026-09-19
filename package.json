@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
-  "workspaces": ["packages/*", "apps/hub", "apps/poc-web"],
+  "workspaces": ["packages/*", "apps/hub", "apps/poc-web", "firmware/dongle/calibration"],
   "scripts": {
     "test": "bun test",
     "typecheck": "bun run --filter '*' typecheck",

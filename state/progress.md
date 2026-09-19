@@ -25,8 +25,8 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - F1.7 终端 [PENDING]
 - F1.8 开源材料 [PENDING]
 
-## M2 - iPad + 终端进阶 [PENDING]
-- F2.1 firmware [PENDING] · F2.2 校准 [PENDING] · F2.3 brain iPad 工具 [PENDING] · F2.4 iOS iPad 被控（runner B）[PENDING] · F2.5 SSH 进阶（runner B）[PENDING]
+## M2 - iPad + 终端进阶 [RUNNING]
+- F2.1 firmware [DONE] 已回收：ESP32-S3 TinyUSB NCM+HID+HTTP 主固件 + RP2040 CircuitPython 备用（未编译/未真机）· F2.2 校准 [DONE] firmware/dongle/calibration 单调分段线性拟合，4 测试，模拟 P95 0.72px · F2.3 brain iPad 工具 [PENDING] · F2.4 iOS iPad 被控（runner B）[PENDING] · F2.5 SSH 进阶（runner B）[PENDING]
 
 ## M3 - 产品化 [PENDING]
 - F3.1 语音（runner B）· F3.2 模型设置页 · F3.3 密文同步 · F3.4 实时画面 · F3.5 OSC 133 · F3.6 JOC 计费 · F3.7 App Store 材料 [PENDING]
