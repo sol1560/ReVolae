@@ -1,7 +1,7 @@
 # Mission Progress
 
 Status: RUNNING
-Current: M0 - PoC
+Current: M1 - Mac MVP（F0.8 等 runner）
 
 ## M0 - PoC [RUNNING]
 - F0.1 monorepo 初始化 [DONE]
@@ -15,9 +15,9 @@ Current: M0 - PoC
 - F0.8 本地模型实测（runner A）[PENDING]
 - Scrutiny: PENDING · Cross-review: PENDING · Probe: PENDING · UX: PENDING
 
-## M1 - Mac MVP [PENDING]
+## M1 - Mac MVP [RUNNING]
 - F1.1 hub [PENDING]
-- F1.2 HPKE + 审批签名 [PENDING]
+- F1.2 HPKE + 审批签名 [DONE] hpke.ts/approval.ts；RFC 9180 A.2.3 向量通过；Swift 互通向量 fixtures/hpke.json+approval.json；protocol 25 测试
 - F1.3 云端大脑 [PENDING]
 - F1.4 daemon-macos（runner A）[PENDING]
 - F1.5 ios（runner B）[PENDING]

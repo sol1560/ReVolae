@@ -108,7 +108,10 @@
           "properties": {
             "alg": {
               "type": "string",
-              "const": "ES256"
+              "enum": [
+                "ES256",
+                "Ed25519"
+              ]
             },
             "keyId": {
               "type": "string"
@@ -181,7 +184,10 @@
           "properties": {
             "alg": {
               "type": "string",
-              "const": "ES256"
+              "enum": [
+                "ES256",
+                "Ed25519"
+              ]
             },
             "keyId": {
               "type": "string"
@@ -3414,7 +3420,10 @@
           "properties": {
             "alg": {
               "type": "string",
-              "const": "ES256"
+              "enum": [
+                "ES256",
+                "Ed25519"
+              ]
             },
             "keyId": {
               "type": "string"

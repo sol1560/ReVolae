@@ -31,14 +31,19 @@ public enum JSONValue: Codable, Sendable, Equatable {
 
 public let protocolVersion = 1
 
+public enum ApprovalSignatureAlg: String, Codable, Sendable, CaseIterable {
+    case eS256 = "ES256"
+    case ed25519 = "Ed25519"
+}
+
 public struct ApprovalSignature: Codable, Sendable {
-    public var alg: String
+    public var alg: ApprovalSignatureAlg
     public var keyId: String
     public var sig: String
     public var expiresAt: Int
     public var nonce: String
 
-    public init(alg: String, keyId: String, sig: String, expiresAt: Int, nonce: String) {
+    public init(alg: ApprovalSignatureAlg, keyId: String, sig: String, expiresAt: Int, nonce: String) {
         self.alg = alg
         self.keyId = keyId
         self.sig = sig

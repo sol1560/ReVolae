@@ -1,0 +1,49 @@
+{
+  "note": "ES256 签名为 64 字节 raw r||s（RFC 6979 确定性 k，lowS）；Ed25519 为 64 字节。签名消息 = signedPayload 的 UTF-8。",
+  "vectors": [
+    {
+      "alg": "ES256",
+      "privateKey": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "publicKey": "048ca057f12d6d664190468e512e51b9f9b4041f75529a376540855b140b6d615a53cd820a42e69a4cb60c7d8b80239486bdf4df7298f995d4b30fff2b2e1f2728",
+      "challenge": "cuaremote-approval-v1\nr1\ns1\n58604c173dfae125a489b913a367f6d5eae80c1820066efc27b5c92ad74b67b0\nn0\n1700000000",
+      "allow": true,
+      "signedPayload": "cuaremote-approval-v1\nr1\ns1\n58604c173dfae125a489b913a367f6d5eae80c1820066efc27b5c92ad74b67b0\nn0\n1700000000\nallow",
+      "signature": {
+        "alg": "ES256",
+        "keyId": "k-ES256",
+        "sig": "rvHB5h1JKW9vSGu4DzGYZ8uEGFL3wPhW7P6uGZABMkJ2x+dNKV7/yj57j9vjYCCN1RkZc3WKGCdYq7Onqicu+w==",
+        "expiresAt": 1700000000,
+        "nonce": "n0"
+      },
+      "denySignature": {
+        "alg": "ES256",
+        "keyId": "k-ES256",
+        "sig": "t+MyjOJpfGJhIlnwaoeei8vBwrb+8ZZzeUUaQb0S/alTZaZfxAYRSxJN4WMRnhFKvIGIwWRr8AfJYBPOMgRMPQ==",
+        "expiresAt": 1700000000,
+        "nonce": "n0"
+      }
+    },
+    {
+      "alg": "Ed25519",
+      "privateKey": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+      "publicKey": "ed3234b276d4ceda57d59bad14fbaf5a773c0f318c999de3a60d53c5a5b34c05",
+      "challenge": "cuaremote-approval-v1\nr1\ns1\n58604c173dfae125a489b913a367f6d5eae80c1820066efc27b5c92ad74b67b0\nn0\n1700000000",
+      "allow": true,
+      "signedPayload": "cuaremote-approval-v1\nr1\ns1\n58604c173dfae125a489b913a367f6d5eae80c1820066efc27b5c92ad74b67b0\nn0\n1700000000\nallow",
+      "signature": {
+        "alg": "Ed25519",
+        "keyId": "k-Ed25519",
+        "sig": "BMUhujs4KIZfW0opRAzY/8Mmd55SFyt/axgiDeH98MkXQ0PSsi3XTZVl8bCTJRLlgHb6hUOXIXzZyfzQIN2mBw==",
+        "expiresAt": 1700000000,
+        "nonce": "n0"
+      },
+      "denySignature": {
+        "alg": "Ed25519",
+        "keyId": "k-Ed25519",
+        "sig": "KyExxioshfahr/cBS5an9Ps7AEjzNh+YhsZrdmGR9A82fuwZqaIBy33t6ZKerOyS3a1fI/DKVHykY/w9QoivDg==",
+        "expiresAt": 1700000000,
+        "nonce": "n0"
+      }
+    }
+  ]
+}

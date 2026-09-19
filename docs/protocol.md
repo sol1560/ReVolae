@@ -54,18 +54,18 @@
 
 ## 审批签名
 
-手机收到 `step.approval_required{challenge, expiresAt}`，用 Secure Enclave P-256 私钥对 `approvalSignedPayload(challenge, allow)`（UTF-8）做 ECDSA-SHA256，回 `approval.decision{signature:{alg:"ES256", keyId, sig(base64 raw r||s), expiresAt, nonce}}`。宿主：
+手机收到 `step.approval_required{challenge, expiresAt}`，用 Secure Enclave P-256 私钥对 `approvalSignedPayload(challenge, allow)`（UTF-8）做 ECDSA-SHA256，回 `approval.decision{signature:{alg:"ES256", keyId, sig(base64 raw r||s), expiresAt, nonce}}`。`alg` 也可以是 `Ed25519`（没有 Secure Enclave 的平台，比如 Android 控制端或测试）。ES256 公钥接受 x963（65 字节）/ raw（64 字节，CryptoKit `rawRepresentation`）/ 压缩（33 字节），签名接受 raw r||s 或 DER。宿主（`ApprovalVerifier`，`packages/protocol/src/approval.ts`）：
 
 1. `expiresAt` 未过期且 ≤ 请求时的 `expiresAt`；
 2. `nonce` 未用过（宿主保留最近 1000 个）；
 3. 用配对时存的手机签名公钥验签；
 4. `challenge` 与自己发出的一致（宿主按 runId+stepId 缓存）。
 
-`challenge = approvalChallenge({runId, stepId, actionDetail, nonce, expiresAt})`，两端实现见 `frame.ts` / `Frame.swift`，测试向量在 `swift/Tests/.../fixtures/binary.json`。
+`challenge = approvalChallenge({runId, stepId, actionDetail, nonce, expiresAt})`，两端实现见 `frame.ts` / `Frame.swift`，测试向量在 `swift/Tests/.../fixtures/binary.json`；两种算法的签名向量（固定私钥、确定性签名）在 `fixtures/approval.json`。
 
 ## 端到端加密
 
-HPKE（RFC 9180）：DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305，Auth 模式（发送方用自己的 X25519 静态私钥认证）。每个方向一个上下文，`info = "cuaremote-v1|" + from + "|" + to`，每帧 `seal(aad = RelayEnvelope 头部字节, pt = Frame 字节)`。会话建立：先发 `enc`（32 字节）作为第一帧 body，之后都是密文。TS 实现在 `apps/hub`/`packages/brain` 共用的 `packages/protocol/src/hpke.ts`（M1），Swift 用 CryptoKit `HPKE.Sender/Recipient`，测试向量 `fixtures/hpke.json`。
+HPKE（RFC 9180）：DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305，Auth 模式（发送方用自己的 X25519 静态私钥认证）。每个方向一个上下文，`info = "cuaremote-v1|" + from + "|" + to`，每帧 `seal(aad = RelayEnvelope 头部字节, pt = Frame 字节)`。会话建立：先发 `enc`（32 字节）作为第一帧 body，之后都是密文。TS 实现在 `apps/hub`/`packages/brain` 共用的 `packages/protocol/src/hpke.ts`（`E2ELink`：`handshake()` 出握手帧，`sealFrame()` / `openRelay()` 收发；拒绝路由不符、重复握手、未握手密文），Swift 用 CryptoKit `HPKE.Sender(recipientKey:ciphersuite:info:authenticatedBy:)` / `HPKE.Recipient(...)`，ciphersuite `.Curve25519_HKDF_SHA256_ChachaPoly`。互通向量 `fixtures/hpke.json`（密钥由 `DeriveKeyPair(ikm)` 派生、enc 由固定 ekm 派生、含 aad 与两帧密文和 exporter），RFC 9180 A.2.3 官方向量 `fixtures/rfc9180-a2-3.json`，都由 `bun run gen:fixtures` 复制到 Swift 测试目录。
 
 ## 配对
 

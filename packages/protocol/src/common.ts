@@ -101,7 +101,7 @@ export type ConcreteAction = z.infer<typeof ConcreteAction>;
 
 /** 手机审批签名：Secure Enclave P-256 对 canonical 串签名 */
 export const ApprovalSignature = z.object({
-  alg: z.literal("ES256"),
+  alg: z.enum(["ES256", "Ed25519"]),
   keyId: z.string(),
   /** base64 DER 或 raw r||s（Swift 用 rawRepresentation） */
   sig: z.string(),

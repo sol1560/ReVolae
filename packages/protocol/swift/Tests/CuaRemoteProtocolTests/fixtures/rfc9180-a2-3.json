@@ -1,0 +1,62 @@
+{
+  "source": "RFC 9180 Appendix A.2.3 (DHKEM X25519, HKDF-SHA256, ChaCha20Poly1305, mode Auth)",
+  "info": "4f6465206f6e2061204772656369616e2055726e",
+  "ikmE": "938d3daa5a8904540bc24f48ae90eed3f4f7f11839560597b55e7c9598c996c0",
+  "pkEm": "f7674cc8cd7baa5872d1f33dbaffe3314239f6197ddf5ded1746760bfc847e0e",
+  "skEm": "c94619e1af28971c8fa7957192b7e62a71ca2dcdde0a7cc4a8a9e741d600ab13",
+  "ikmR": "64835d5ee64aa7aad57c6f2e4f758f7696617f8829e70bc9ac7a5ef95d1c756c",
+  "pkRm": "1a478716d63cb2e16786ee93004486dc151e988b34b475043d3e0175bdb01c44",
+  "skRm": "3ca22a6d1cda1bb9480949ec5329d3bf0b080ca4c45879c95eddb55c70b80b82",
+  "ikmS": "9d8f94537d5a3ddef71234c0baedfad4ca6861634d0b94c3007fed557ad17df6",
+  "pkSm": "f0f4f9e96c54aeed3f323de8534fffd7e0577e4ce269896716bcb95643c8712b",
+  "skSm": "2def0cb58ffcf83d1062dd085c8aceca7f4c0c3fd05912d847b61f3e54121f05",
+  "enc": "f7674cc8cd7baa5872d1f33dbaffe3314239f6197ddf5ded1746760bfc847e0e",
+  "shared_secret": "d2d67828c8bc9fa661cf15a31b3ebf1febe0cafef7abfaaca580aaf6d471e3eb",
+  "key": "b071fd1136680600eb447a845a967d35e9db20749cdf9ce098bcc4deef4b1356",
+  "base_nonce": "d20577dff16d7cea2c4bf780",
+  "exporter_secret": "be2d93b82071318cdb88510037cf504344151f2f9b9da8ab48974d40a2251dd7",
+  "encryptions": [
+    {
+      "sequence_number": "0",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d30",
+      "nonce": "d20577dff16d7cea2c4bf780",
+      "ct": "ab1a13c9d4f01a87ec3440dbd756e2677bd2ecf9df0ce7ed73869b98e00c09be111cb9fdf077347aeb88e61bdf"
+    },
+    {
+      "sequence_number": "1",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d31",
+      "nonce": "d20577dff16d7cea2c4bf781",
+      "ct": "3265c7807ffff7fdace21659a2c6ccffee52a26d270c76468ed74202a65478bfaedfff9c2b7634e24f10b71016"
+    },
+    {
+      "sequence_number": "2",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d32",
+      "nonce": "d20577dff16d7cea2c4bf782",
+      "ct": "3aadee86ad2a05081ea860033a9d09dbccb4acac2ded0891da40f51d4df19925f7a767b076a5cbc9355c8fd35e"
+    },
+    {
+      "sequence_number": "4",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d34",
+      "nonce": "d20577dff16d7cea2c4bf784",
+      "ct": "502ecccd5c2be3506a081809cc58b43b94f77cbe37b8b31712d9e21c9e61aa6946a8e922f54eae630f88eb8033"
+    },
+    {
+      "sequence_number": "255",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d323535",
+      "nonce": "d20577dff16d7cea2c4bf77f",
+      "ct": "652e597ba20f3d9241cda61f33937298b1169e6adf72974bbe454297502eb4be132e1c5064702fc165c2ddbde8"
+    },
+    {
+      "sequence_number": "256",
+      "pt": "4265617574792069732074727574682c20747275746820626561757479",
+      "aad": "436f756e742d323536",
+      "nonce": "d20577dff16d7cea2c4bf680",
+      "ct": "3be14e8b3bbd1028cf2b7d0a691dbbeff71321e7dec92d3c2cfb30a0994ab246af76168480285a60037b4ba13a"
+    }
+  ]
+}
