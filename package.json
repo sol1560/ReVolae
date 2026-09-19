@@ -1,0 +1,16 @@
+{
+  "name": "cuaremote",
+  "private": true,
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "workspaces": ["packages/*", "apps/hub", "apps/poc-web"],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bun run --filter '*' typecheck",
+    "gen": "bun run --filter @cuaremote/protocol gen:schema && bun run --filter @cuaremote/protocol gen:swift"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/bun": "^1.3.0"
+  }
+}

@@ -1,0 +1,299 @@
+import { z } from "zod";
+import {
+  ApprovalSignature,
+  CapabilityCard,
+  Channel,
+  ConcreteAction,
+  Cost,
+  DevicePlatform,
+  DeviceStats,
+  HistoryItem,
+  Level,
+  PlanStep,
+  PrecheckSource,
+  PrivacySettings,
+  PublicKeys,
+  Scope,
+  Shortcut,
+  ToolDescriptor,
+  Verdict,
+} from "./common.js";
+
+const base = { v: z.literal(1), id: z.string() };
+const msg = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
+  z.object({ ...base, type: z.literal(type), ...shape });
+
+// ─────────────────────────── 手机 → 设备 ───────────────────────────
+
+export const IntentSubmit = msg("intent.submit", {
+  text: z.string().min(1),
+  deviceId: z.string(),
+  mode: z.enum(["agent", "terminal"]),
+  /** 覆盖默认 provider，如 anthropic:claude-fable-5.1 / ollama:muse-glimmer:30b-mlx */
+  provider: z.string().optional(),
+  /** terminal 模式：把建议命令填进哪个会话 */
+  terminalSessionId: z.string().optional(),
+});
+export const RunCancel = msg("run.cancel", { runId: z.string() });
+export const ApprovalDecision = msg("approval.decision", {
+  runId: z.string(),
+  stepId: z.string(),
+  allow: z.boolean(),
+  remember: z.enum(["once", "always"]).default("once"),
+  signature: ApprovalSignature.optional(),
+});
+export const TerminalOpen = msg("terminal.open", {
+  sessionId: z.string(),
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+  cwd: z.string().optional(),
+  signature: ApprovalSignature.optional(),
+});
+export const TerminalResize = msg("terminal.resize", {
+  sessionId: z.string(),
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+});
+export const TerminalClose = msg("terminal.close", { sessionId: z.string() });
+/** 窗口式背压：告诉对端已消费多少字节 */
+export const TerminalAck = msg("terminal.ack", { sessionId: z.string(), bytes: z.number().int().nonnegative() });
+export const MediaSubscribe = msg("media.subscribe", {
+  fps: z.number().positive().max(30),
+  maxWidth: z.number().int().positive(),
+  codec: z.enum(["jpeg", "h264"]).default("jpeg"),
+});
+export const MediaUnsubscribe = msg("media.unsubscribe", {});
+export const StatsGet = msg("stats.get", {});
+export const ShortcutRun = msg("shortcut.run", { shortcutId: z.string(), params: z.record(z.string(), z.string()).default({}) });
+export const HistoryList = msg("history.list", { cursor: z.string().optional(), limit: z.number().int().positive().max(200).default(50) });
+export const PrivacySet = msg("privacy.set", { settings: PrivacySettings });
+export const PrivacyGet = msg("privacy.get", {});
+export const ScopeSet = msg("scope.set", { scope: Scope });
+export const AppLearnStart = msg("app.learn.start", { bundleId: z.string(), explore: z.boolean().default(false) });
+export const AppLearnStop = msg("app.learn.stop", { bundleId: z.string() });
+export const AppCardRun = msg("app.card.run", { cardId: z.string(), params: z.record(z.string(), z.string()).default({}) });
+export const AppCardsGet = msg("app.cards.get", { bundleId: z.string().optional() });
+export const CapabilitiesGet = msg("capabilities.get", {});
+
+// ─────────────────────────── 设备 → 手机 ───────────────────────────
+
+export const RunCreated = msg("run.created", {
+  runId: z.string(),
+  deviceId: z.string(),
+  intent: z.string(),
+  provider: z.string(),
+  plan: z.array(PlanStep),
+});
+export const PlanUpdated = msg("plan.updated", { runId: z.string(), plan: z.array(PlanStep) });
+export const StepStarted = msg("step.started", { runId: z.string(), stepId: z.string(), title: z.string(), channel: Channel.optional() });
+export const StepPrecheck = msg("step.precheck", {
+  runId: z.string(),
+  stepId: z.string(),
+  staticLevel: Level,
+  level: Level,
+  intentMatch: z.boolean().optional(),
+  risk: z.number().min(0).max(1).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  jevMs: z.number().nonnegative().optional(),
+  verdict: Verdict,
+  source: PrecheckSource,
+});
+export const StepApprovalRequired = msg("step.approval_required", {
+  runId: z.string(),
+  stepId: z.string(),
+  level: Level,
+  action: ConcreteAction,
+  reason: z.string(),
+  /** 秒级 unix */
+  expiresAt: z.number().int(),
+  /** 手机签名时要签的 canonical 串 */
+  challenge: z.string(),
+});
+export const StepFinished = msg("step.finished", {
+  runId: z.string(),
+  stepId: z.string(),
+  ok: z.boolean(),
+  ms: z.number().nonnegative(),
+  channel: Channel.optional(),
+  cost: Cost.optional(),
+  dataLeftDevice: z.boolean(),
+  output: z.string().optional(),
+  error: z.string().optional(),
+});
+export const RunFinished = msg("run.finished", {
+  runId: z.string(),
+  ok: z.boolean(),
+  summary: z.string(),
+  cost: Cost,
+  stepCount: z.number().int(),
+  cancelled: z.boolean().default(false),
+});
+/** terminal 模式下大脑给出的建议命令，不执行 */
+export const TerminalSuggestion = msg("terminal.suggestion", {
+  runId: z.string(),
+  sessionId: z.string().optional(),
+  command: z.string(),
+  explanation: z.string(),
+  level: Level,
+});
+export const TerminalOpened = msg("terminal.opened", { sessionId: z.string(), pid: z.number().int().optional() });
+export const TerminalExit = msg("terminal.exit", { sessionId: z.string(), code: z.number().int().optional() });
+export const MediaInfo = msg("media.info", {
+  width: z.number().int(),
+  height: z.number().int(),
+  codec: z.enum(["jpeg", "h264"]),
+  fps: z.number(),
+});
+export const Stats = msg("stats", { deviceId: z.string(), stats: DeviceStats });
+export const Capabilities = msg("capabilities", {
+  deviceId: z.string(),
+  platform: DevicePlatform,
+  name: z.string(),
+  tools: z.array(ToolDescriptor),
+  scope: Scope,
+  brainAvailable: z.boolean(),
+  brainUnavailableReason: z.string().optional(),
+  daemonVersion: z.string(),
+});
+export const PrivacyState = msg("privacy.state", {
+  deviceId: z.string(),
+  settings: PrivacySettings,
+  /** 「数据去哪了」：每类数据当前去向 */
+  dataFlow: z.array(z.object({ data: z.string(), destination: z.string(), reason: z.string() })),
+});
+export const HistoryPage = msg("history.page", { items: z.array(HistoryItem), nextCursor: z.string().optional() });
+export const AppLearnProgress = msg("app.learn.progress", {
+  bundleId: z.string(),
+  phase: z.enum(["sdef", "menu", "window", "shortcuts", "explore", "summarize", "done", "failed"]),
+  found: z.number().int(),
+  message: z.string().optional(),
+});
+export const AppCards = msg("app.cards", { cards: z.array(CapabilityCard) });
+export const ShortcutsList = msg("shortcuts.list", { shortcuts: z.array(Shortcut) });
+export const ErrorMsg = msg("error", { code: z.string(), message: z.string(), ref: z.string().optional() });
+export const Ack = msg("ack", { ref: z.string() });
+
+// ─────────────────────────── 端 ↔ hub（明文）───────────────────────────
+
+export const Hello = msg("hello", {
+  role: z.enum(["device", "phone", "brain"]),
+  deviceId: z.string(),
+  platform: DevicePlatform,
+  name: z.string(),
+  pubKeys: PublicKeys,
+  protocolVersion: z.literal(1),
+  /** 手机带 JOC JWT */
+  token: z.string().optional(),
+});
+export const AuthChallenge = msg("auth.challenge", { nonce: z.string() });
+export const AuthResponse = msg("auth.response", { nonce: z.string(), signature: z.string() });
+export const AuthOk = msg("auth.ok", { sessionToken: z.string(), expiresAt: z.number().int() });
+export const Presence = msg("presence", { deviceId: z.string(), online: z.boolean(), lastSeen: z.number().int() });
+export const PeerKeys = msg("peer.keys", { deviceId: z.string(), pubKeys: PublicKeys });
+export const PushRegister = msg("push.register", { platform: z.enum(["apns", "fcm"]), token: z.string(), /** HPKE 公钥，推送内容用它封装 */ pushKem: z.string() });
+export const PushSend = msg("push.send", { to: z.string(), sealed: z.string(), category: z.string() });
+export const UsageReport = msg("usage.report", { runId: z.string(), cost: Cost, steps: z.number().int(), jevCalls: z.number().int() });
+
+// 配对
+export const PairOffer = z.object({
+  hubURL: z.string().url(),
+  deviceId: z.string(),
+  name: z.string(),
+  pubKeys: PublicKeys,
+  /** base64 16 字节一次性 secret */
+  secret: z.string(),
+  expiresAt: z.number().int(),
+});
+export type PairOffer = z.infer<typeof PairOffer>;
+export const PairRequest = msg("pair.request", {
+  deviceId: z.string(),
+  phoneId: z.string(),
+  phoneName: z.string(),
+  phonePubKeys: PublicKeys,
+  /** HMAC-SHA256(secret, deviceKem || phoneKem) base64 */
+  hmac: z.string(),
+});
+export const PairConfirm = msg("pair.confirm", { deviceId: z.string(), phoneId: z.string(), accept: z.boolean() });
+export const PairResult = msg("pair.result", { deviceId: z.string(), phoneId: z.string(), ok: z.boolean(), reason: z.string().optional() });
+/** 无摄像头时的 6 位码撮合 */
+export const PairCodeClaim = msg("pair.code.claim", { code: z.string().length(6), phoneId: z.string(), phonePubKeys: PublicKeys });
+
+// ─────────────────────────── 大脑 ↔ 宿主 ───────────────────────────
+
+export const ToolsList = msg("tools.list", {});
+export const ToolsListResult = msg("tools.list.result", { tools: z.array(ToolDescriptor), scope: Scope });
+export const ToolsCall = msg("tools.call", { callId: z.string(), tool: z.string(), args: z.record(z.string(), z.unknown()), timeoutMs: z.number().int().positive().default(60_000) });
+export const ToolsResult = msg("tools.result", {
+  callId: z.string(),
+  ok: z.boolean(),
+  output: z.string().optional(),
+  /** 截图等二进制走 media 流，这里放引用 */
+  attachments: z.array(z.object({ kind: z.enum(["image/jpeg", "image/png", "text/plain"]), streamId: z.number().int().optional(), inline: z.string().optional() })).default([]),
+  error: z.string().optional(),
+  ms: z.number().nonnegative(),
+});
+export const EventEmit = msg("event.emit", { event: z.record(z.string(), z.unknown()) });
+export const ApprovalRequest = msg("approval.request", { runId: z.string(), stepId: z.string(), level: Level, action: ConcreteAction, reason: z.string(), challenge: z.string(), expiresAt: z.number().int() });
+export const ApprovalResponse = msg("approval.response", { runId: z.string(), stepId: z.string(), allow: z.boolean(), remember: z.enum(["once", "always"]).default("once"), signature: ApprovalSignature.optional() });
+
+// ─────────────────────────── 联合 ───────────────────────────
+
+export const PhoneToDevice = z.discriminatedUnion("type", [
+  IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
+  MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet,
+]);
+export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
+
+export const DeviceToPhone = z.discriminatedUnion("type", [
+  RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
+  TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, MediaInfo, Stats, Capabilities, PrivacyState,
+  HistoryPage, AppLearnProgress, AppCards, ShortcutsList, ErrorMsg, Ack,
+]);
+export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
+
+export const HubMessage = z.discriminatedUnion("type", [
+  Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, ErrorMsg, Ack,
+]);
+export type HubMessage = z.infer<typeof HubMessage>;
+
+export const BrainHostMessage = z.discriminatedUnion("type", [
+  ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse, ErrorMsg,
+]);
+export type BrainHostMessage = z.infer<typeof BrainHostMessage>;
+
+/** 端到端（解密后）帧里 kind=0 的所有控制消息 */
+const peerList = [
+  ...PhoneToDevice.options,
+  ...DeviceToPhone.options.filter((o) => !["terminal.ack", "error", "ack"].includes(o.shape.type.value)),
+];
+export const PeerMessage = z.discriminatedUnion("type", [peerList[0]!, ...peerList.slice(1)] as [(typeof peerList)[number], ...(typeof peerList)[number][]]);
+export type PeerMessage = z.infer<typeof PeerMessage>;
+
+/** 所有消息，按 type 索引，供生成器使用 */
+export const AllMessages = {
+  IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
+  MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
+  AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet,
+  RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
+  TerminalSuggestion, TerminalOpened, TerminalExit, MediaInfo, Stats, Capabilities, PrivacyState,
+  HistoryPage, AppLearnProgress, AppCards, ShortcutsList, ErrorMsg, Ack,
+  Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim,
+  ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,
+} as const;
+
+const allList = Object.values(AllMessages);
+export const AnyMessage = z.discriminatedUnion("type", [allList[0]!, ...allList.slice(1)] as [(typeof allList)[number], ...(typeof allList)[number][]]);
+export type AnyMessage = z.infer<typeof AnyMessage>;
+
+// ─────────────────────────── 构造辅助 ───────────────────────────
+
+/** 去掉信封字段后的消息体（分配到每个成员） */
+export type MsgBody<M = AnyMessage> = M extends { type: string } ? Omit<M, "v" | "id"> : never;
+
+/** 给消息体补上信封字段 v/id，并做一次校验。所有发送方都应该用它。 */
+export function mkMsg<B extends MsgBody>(body: B, id: string = crypto.randomUUID()): Extract<AnyMessage, { type: B["type"] }> {
+  return AnyMessage.parse({ v: 1, id, ...body }) as Extract<AnyMessage, { type: B["type"] }>;
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@cuaremote/poc-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "@cuaremote/protocol": "workspace:*", "zod": "^4.1.0" }
+}

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "brainLocation": {
+      "type": "string",
+      "enum": [
+        "local",
+        "cloud",
+        "lan"
+      ]
+    },
+    "brainDeviceId": {
+      "type": "string"
+    },
+    "sync": {
+      "type": "object",
+      "properties": {
+        "history": {
+          "type": "boolean"
+        },
+        "screenshots": {
+          "type": "boolean"
+        },
+        "logs": {
+          "type": "boolean"
+        },
+        "shortcuts": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "history",
+        "screenshots",
+        "logs",
+        "shortcuts"
+      ],
+      "additionalProperties": false
+    },
+    "modelTier": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "zdr",
+        "byok",
+        "local"
+      ]
+    },
+    "localBrainModel": {
+      "type": "string"
+    },
+    "localGuiModel": {
+      "type": "string"
+    },
+    "jevEnabled": {
+      "type": "boolean"
+    },
+    "autonomy": {
+      "type": "string",
+      "enum": [
+        "cautious",
+        "balanced",
+        "handsoff"
+      ]
+    }
+  },
+  "required": [
+    "brainLocation",
+    "sync",
+    "modelTier",
+    "jevEnabled",
+    "autonomy"
+  ],
+  "additionalProperties": false
+}
