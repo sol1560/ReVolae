@@ -50,7 +50,7 @@ await macLink.openRelay(phoneHandshake);
 await phoneLink.openRelay(macHandshake);
 const phoneToMac = [] as string[];
 for (const f of frames) phoneToMac.push(hex.to(await phoneLink.sealFrame(f)));
-const macToPhone = hex.to(await macLink.sealFrame(controlFrame({ v: 1, id: "m9", type: "run.finished", runId: "r1", status: "ok", summary: "done" }, 3)));
+const macToPhone = hex.to(await macLink.sealFrame(controlFrame({ v: 1, id: "m9", type: "run.finished", runId: "r1", ok: true, summary: "done", cost: { inputTokens: 10, outputTokens: 5, jevTokens: 0, usd: 0.001 }, stepCount: 1, cancelled: false }, 3)));
 
 // 单独的 export 向量（同 ekm、同 info，独立上下文避免 seq 干扰）
 const exporterCtx = await SealContext.create({ self: phone, peerPublicKey: mac.publicKey, from: phoneId, to: macId, ekm: ekmPhone });
@@ -68,7 +68,7 @@ writeFileSync(join(tsDir, "hpke.json"), JSON.stringify({
   macHandshake: hex.to(macHandshake),
   plaintexts: frames.map(hex.to),
   phoneToMac,
-  macToPhonePlaintext: hex.to(controlFrame({ v: 1, id: "m9", type: "run.finished", runId: "r1", status: "ok", summary: "done" }, 3)),
+  macToPhonePlaintext: hex.to(controlFrame({ v: 1, id: "m9", type: "run.finished", runId: "r1", ok: true, summary: "done", cost: { inputTokens: 10, outputTokens: 5, jevTokens: 0, usd: 0.001 }, stepCount: 1, cancelled: false }, 3)),
   macToPhone,
   exporter: { context: hex.to(new TextEncoder().encode("cuaremote-export-test")), length: 32, value: hex.to(exported) },
 }, null, 2));

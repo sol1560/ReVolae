@@ -4,6 +4,17 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
-  "dependencies": { "@cuaremote/protocol": "workspace:*", "zod": "^4.1.0" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "bun run src/server.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@cuaremote/protocol": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
 }

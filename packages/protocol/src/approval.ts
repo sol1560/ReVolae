@@ -12,6 +12,8 @@ import { p256 } from "@noble/curves/nist.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { ApprovalSignature, PublicKeys } from "./common.js";
+
+export type SigAlg = PublicKeys["sigAlg"];
 import { approvalSignedPayload } from "./frame.js";
 
 const utf8 = new TextEncoder();
@@ -79,37 +81,48 @@ export class ApprovalVerifier {
 
 /** 无状态：只验签名本身（规则 3） */
 export function verifyApprovalSignature(p: { challenge: string; allow: boolean; signature: ApprovalSignature; phoneKeys: Pick<PublicKeys, "sig" | "sigAlg"> }): ApprovalVerifyResult {
-  const msg = utf8.encode(approvalSignedPayload(p.challenge, p.allow));
-  const pub = fromB64(p.phoneKeys.sig);
-  const sigBytes = fromB64(p.signature.sig);
+  return verifySignedPayload({ payload: utf8.encode(approvalSignedPayload(p.challenge, p.allow)), alg: p.signature.alg, sig: p.signature.sig, publicKey: p.phoneKeys });
+}
+
+/**
+ * 通用验签：审批签名、hub 登录挑战应答都走这里。
+ * sig / publicKey.sig 都是 base64。ES256 公钥收 x963/raw/压缩，签名收 raw r||s 或 DER。
+ */
+export function verifySignedPayload(p: { payload: Uint8Array; alg: SigAlg; sig: string; publicKey: Pick<PublicKeys, "sig" | "sigAlg"> }): ApprovalVerifyResult {
+  const pub = fromB64(p.publicKey.sig);
+  const sigBytes = fromB64(p.sig);
   try {
-    if (p.phoneKeys.sigAlg === "ES256" && p.signature.alg === "ES256") {
+    if (p.publicKey.sigAlg === "ES256" && p.alg === "ES256") {
       const pubKey = normalizeP256Public(pub);
       if (!pubKey) return { ok: false, reason: "bad_key", message: `P-256 公钥长度不对：${pub.byteLength}` };
       const sig = normalizeP256Signature(sigBytes);
       if (!sig) return { ok: false, reason: "bad_signature", message: `签名格式不对（长度 ${sigBytes.byteLength}）` };
-      const ok = p256.verify(sig, sha256(msg), pubKey, { prehash: false, lowS: false });
+      const ok = p256.verify(sig, sha256(p.payload), pubKey, { prehash: false, lowS: false });
       return ok ? { ok: true } : { ok: false, reason: "bad_signature", message: "ES256 验签失败" };
     }
-    if (p.phoneKeys.sigAlg === "Ed25519" && p.signature.alg === "Ed25519") {
+    if (p.publicKey.sigAlg === "Ed25519" && p.alg === "Ed25519") {
       if (pub.byteLength !== 32) return { ok: false, reason: "bad_key", message: "Ed25519 公钥应为 32 字节" };
       if (sigBytes.byteLength !== 64) return { ok: false, reason: "bad_signature", message: "Ed25519 签名应为 64 字节" };
-      return ed25519.verify(sigBytes, msg, pub) ? { ok: true } : { ok: false, reason: "bad_signature", message: "Ed25519 验签失败" };
+      return ed25519.verify(sigBytes, p.payload, pub) ? { ok: true } : { ok: false, reason: "bad_signature", message: "Ed25519 验签失败" };
     }
-    return { ok: false, reason: "unsupported_alg", message: `不支持的算法组合 ${p.phoneKeys.sigAlg}/${p.signature.alg}` };
+    return { ok: false, reason: "unsupported_alg", message: `不支持的算法组合 ${p.publicKey.sigAlg}/${p.alg}` };
   } catch (e) {
     return { ok: false, reason: "bad_signature", message: e instanceof Error ? e.message : String(e) };
   }
 }
 
-/** 测试 / 非 Secure Enclave 平台用：软件密钥签名 */
-export function signApproval(p: { challenge: string; allow: boolean; privateKey: Uint8Array; alg: "ES256" | "Ed25519"; keyId: string; nonce: string; expiresAt: number }): ApprovalSignature {
-  const msg = utf8.encode(approvalSignedPayload(p.challenge, p.allow));
-  const raw = p.alg === "ES256" ? p256.sign(sha256(msg), p.privateKey, { prehash: false, lowS: true }) : ed25519.sign(msg, p.privateKey);
-  return { alg: p.alg, keyId: p.keyId, sig: Buffer.from(raw).toString("base64"), expiresAt: p.expiresAt, nonce: p.nonce };
+/** 软件密钥签名（测试 / 无 Secure Enclave 平台）。返回 base64 raw 签名。 */
+export function signPayload(payload: Uint8Array, privateKey: Uint8Array, alg: SigAlg): string {
+  const raw = alg === "ES256" ? p256.sign(sha256(payload), privateKey, { prehash: false, lowS: true }) : ed25519.sign(payload, privateKey);
+  return Buffer.from(raw).toString("base64");
 }
 
-export function generateSigningKeyPair(alg: "ES256" | "Ed25519"): { publicKey: Uint8Array; privateKey: Uint8Array } {
+/** 测试 / 非 Secure Enclave 平台用：软件密钥签名 */
+export function signApproval(p: { challenge: string; allow: boolean; privateKey: Uint8Array; alg: SigAlg; keyId: string; nonce: string; expiresAt: number }): ApprovalSignature {
+  return { alg: p.alg, keyId: p.keyId, sig: signPayload(utf8.encode(approvalSignedPayload(p.challenge, p.allow)), p.privateKey, p.alg), expiresAt: p.expiresAt, nonce: p.nonce };
+}
+
+export function generateSigningKeyPair(alg: SigAlg): { publicKey: Uint8Array; privateKey: Uint8Array } {
   if (alg === "ES256") {
     const priv = p256.utils.randomSecretKey();
     return { privateKey: priv, publicKey: p256.getPublicKey(priv, false) }; // x963 65 字节，和 CryptoKit x963Representation 一致

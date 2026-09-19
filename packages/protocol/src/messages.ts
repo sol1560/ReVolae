@@ -215,8 +215,9 @@ export const PairRequest = msg("pair.request", {
 });
 export const PairConfirm = msg("pair.confirm", { deviceId: z.string(), phoneId: z.string(), accept: z.boolean() });
 export const PairResult = msg("pair.result", { deviceId: z.string(), phoneId: z.string(), ok: z.boolean(), reason: z.string().optional() });
-/** 无摄像头时的 6 位码撮合 */
+/** 无摄像头时的 6 位码撮合：手机拿 code 换 PairOffer，之后照常走 pair.request */
 export const PairCodeClaim = msg("pair.code.claim", { code: z.string().length(6), phoneId: z.string(), phonePubKeys: PublicKeys });
+export const PairOfferMsg = msg("pair.offer", PairOffer.shape);
 
 // ─────────────────────────── 大脑 ↔ 宿主 ───────────────────────────
 
@@ -254,7 +255,7 @@ export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
 export const HubMessage = z.discriminatedUnion("type", [
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim, ErrorMsg, Ack,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, ErrorMsg, Ack,
 ]);
 export type HubMessage = z.infer<typeof HubMessage>;
 
@@ -280,7 +281,7 @@ export const AllMessages = {
   TerminalSuggestion, TerminalOpened, TerminalExit, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ShortcutsList, ErrorMsg, Ack,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
-  PairRequest, PairConfirm, PairResult, PairCodeClaim,
+  PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg,
   ToolsList, ToolsListResult, ToolsCall, ToolsResult, EventEmit, ApprovalRequest, ApprovalResponse,
 } as const;
 

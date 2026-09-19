@@ -2994,6 +2994,76 @@
         },
         "type": {
           "type": "string",
+          "const": "pair.offer"
+        },
+        "hubURL": {
+          "type": "string",
+          "format": "uri"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pubKeys": {
+          "type": "object",
+          "properties": {
+            "kem": {
+              "type": "string"
+            },
+            "sig": {
+              "type": "string"
+            },
+            "sigAlg": {
+              "type": "string",
+              "enum": [
+                "ES256",
+                "Ed25519"
+              ]
+            }
+          },
+          "required": [
+            "kem",
+            "sig",
+            "sigAlg"
+          ],
+          "additionalProperties": false
+        },
+        "secret": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "hubURL",
+        "deviceId",
+        "name",
+        "pubKeys",
+        "secret",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "tools.list"
         }
       },

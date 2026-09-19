@@ -16,7 +16,7 @@ Current: M1 - Mac MVP（F0.8 等 runner）
 - Scrutiny: PENDING · Cross-review: PENDING · Probe: PENDING · UX: PENDING
 
 ## M1 - Mac MVP [RUNNING]
-- F1.1 hub [PENDING]
+- F1.1 hub [DONE] apps/hub：Bun.serve WS 中继 + 公钥挑战登录 + 配对撮合（HMAC 端到端验）+ 6 位码 + 推送 dry-run/APNs + 用量 + bun:sqlite + 多账号 JWT；6 个集成测试
 - F1.2 HPKE + 审批签名 [DONE] hpke.ts/approval.ts；RFC 9180 A.2.3 向量通过；Swift 互通向量 fixtures/hpke.json+approval.json；protocol 25 测试
 - F1.3 云端大脑 [PENDING]
 - F1.4 daemon-macos（runner A）[PENDING]

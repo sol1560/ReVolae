@@ -2022,6 +2022,41 @@ public struct PairCodeClaim: Codable, Sendable {
     }
 }
 
+public struct PairOfferMsg: Codable, Sendable {
+    public static let messageType = "pair.offer"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "pair.offer"
+    public var hubURL: String
+    public var deviceId: String
+    public var name: String
+    public var pubKeys: PublicKeys
+    public var secret: String
+    public var expiresAt: Int
+
+    public init(id: String, hubURL: String, deviceId: String, name: String, pubKeys: PublicKeys, secret: String, expiresAt: Int) {
+        self.id = id
+        self.hubURL = hubURL
+        self.deviceId = deviceId
+        self.name = name
+        self.pubKeys = pubKeys
+        self.secret = secret
+        self.expiresAt = expiresAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case hubURL
+        case deviceId
+        case name
+        case pubKeys
+        case secret
+        case expiresAt
+    }
+}
+
 public struct ToolsList: Codable, Sendable {
     public static let messageType = "tools.list"
     public var v: Int = 1
@@ -2300,6 +2335,7 @@ public enum AnyMessage: Codable, Sendable {
     case pairConfirm(PairConfirm)
     case pairResult(PairResult)
     case pairCodeClaim(PairCodeClaim)
+    case pairOfferMsg(PairOfferMsg)
     case toolsList(ToolsList)
     case toolsListResult(ToolsListResult)
     case toolsCall(ToolsCall)
@@ -2365,6 +2401,7 @@ public enum AnyMessage: Codable, Sendable {
         case .pairConfirm: return "pair.confirm"
         case .pairResult: return "pair.result"
         case .pairCodeClaim: return "pair.code.claim"
+        case .pairOfferMsg: return "pair.offer"
         case .toolsList: return "tools.list"
         case .toolsListResult: return "tools.list.result"
         case .toolsCall: return "tools.call"
@@ -2432,6 +2469,7 @@ public enum AnyMessage: Codable, Sendable {
         case "pair.confirm": self = .pairConfirm(try c.decode(PairConfirm.self))
         case "pair.result": self = .pairResult(try c.decode(PairResult.self))
         case "pair.code.claim": self = .pairCodeClaim(try c.decode(PairCodeClaim.self))
+        case "pair.offer": self = .pairOfferMsg(try c.decode(PairOfferMsg.self))
         case "tools.list": self = .toolsList(try c.decode(ToolsList.self))
         case "tools.list.result": self = .toolsListResult(try c.decode(ToolsListResult.self))
         case "tools.call": self = .toolsCall(try c.decode(ToolsCall.self))
@@ -2500,6 +2538,7 @@ public enum AnyMessage: Codable, Sendable {
         case .pairConfirm(let v): try c.encode(v)
         case .pairResult(let v): try c.encode(v)
         case .pairCodeClaim(let v): try c.encode(v)
+        case .pairOfferMsg(let v): try c.encode(v)
         case .toolsList(let v): try c.encode(v)
         case .toolsListResult(let v): try c.encode(v)
         case .toolsCall(let v): try c.encode(v)

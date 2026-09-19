@@ -73,3 +73,21 @@ Mac `cuaremote pair` 打印 `PairOffer` 二维码（JSON）。手机扫码后：
 1. 手机连 hub，发 `pair.request{deviceId, phoneId, phonePubKeys, hmac}`，`hmac = HMAC-SHA256(secret, deviceKem || phoneKem)`（base64 原始字节拼接）。
 2. hub 转给设备；设备验 HMAC、检查 `expiresAt`、终端提示「iPhone 请求配对，按 Enter 确认」，回 `pair.confirm`。
 3. hub 把 `pair.result` 发给双方，双方保存对方 `PublicKeys`。
+
+没摄像头（或不想扫码）时：设备用会话 token `POST /api/pair/code`（body = PairOffer 去掉 hubURL/expiresAt）拿 6 位码，5 分钟有效、只能用一次；手机发 `pair.code.claim{code}`，hub 回 `pair.offer{...}`（内容和二维码一样），之后照常走上面 1–3。两端实现：`pairHmac()` / `pairHmacEquals()`（`packages/protocol/src/pairing.ts`）。
+
+## hub 登录与中继
+
+一条 WebSocket（`/ws`）两种帧：文本帧是 `HubMessage` JSON（明文控制），二进制帧是 `RelayEnvelope`（hub 只读 `to/from`，body 原样转发）。
+
+登录：`hello{role, deviceId, pubKeys, token?}` → hub 回 `auth.challenge{nonce}` → 端用签名私钥对 `hubAuthPayload(deviceId, nonce)`（`"cuaremote-hub-auth-v1\n" + deviceId + "\n" + nonce` 的 UTF-8）签名，发 `auth.response{nonce, signature(base64)}` → `auth.ok{sessionToken, expiresAt}`。之后 hub 立刻推 `peer.keys` + `presence`（每个配过对的对端一条），并向对端广播我方上线。
+
+规则：
+- 同一个 `deviceId` 只认第一次登记的公钥（换公钥回 `key_mismatch` 并断开，关闭码 4003）；换设备要先解绑（`DELETE /api/pairings?peer=`）。
+- 同一个 `deviceId` 只保留最新一条连接，旧的被 4000 `replaced` 踢掉。
+- 中继只在「配过对」的两端之间放行；信封 `from` 必须等于自己，否则 `from_mismatch`。对端不在线回 `error{code:"peer_offline", ref: to}`，不排队（端到端密文没法给离线方补发，改走推送）。
+- 多账号模式（hub 设 `HUB_JWT_SECRET`）：手机 `hello.token` 必须是 HS256 JWT（`sub` = 账号）；被控设备首次连上时归 `unclaimed`，配对成功那一刻归入手机的账号，之后别的账号的手机配不上（`account_mismatch`）。不设 secret 是单机模式，所有端同属 `local`。
+- 推送：手机 `push.register{platform, token, pushKem}`；设备在手机离线时发 `push.send{to, sealed, category}`，`sealed` 由设备用 `pushKem` HPKE 封好，hub 不解密。没 APNs 配置时 hub 只记 `push_outbox`（status `dry-run`）。
+- 计量：`usage.report` 按账号入库，`GET /api/usage?since=` 查汇总。
+
+HTTP 接口都用 `Authorization: Bearer <sessionToken>`：`POST /api/pair/code`、`GET /api/devices`、`GET /api/usage`、`DELETE /api/pairings?peer=`；`GET /healthz` 免鉴权。
