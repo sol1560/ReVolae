@@ -117,44 +117,48 @@ test("FreshLink rejects extra handshake fields and duplicate key frames", async 
   expect(a.ready).toBe(false);
 });
 
-test("Swift FreshLink ciphertext and ES256 signatures interoperate with TypeScript", async () => {
-  const root = fileURLToPath(new URL("../../..", import.meta.url));
-  const result = spawnSync("swift", ["run", "--package-path", "packages/protocol/swift", "FreshLinkInteropFixture"], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: 180_000,
-  });
-  if (result.status !== 0) throw new Error(result.stderr || `Swift fixture exited ${result.status}`);
-  const swift = JSON.parse(result.stdout) as {
-    phoneId: string;
-    macId: string;
-    phonePrivate: string;
-    phonePublic: string;
-    macPublic: string;
-    macEnc: string;
-    macNonce: string;
-    phoneNonce: string;
-    ciphertext: string;
-    authPayload: string;
-    authPublicKey: string;
-    authSignature: string;
-  };
-  const envelopeBytes = hex.from(swift.ciphertext);
-  const envelope = decodeRelay(envelopeBytes);
-  const opener = await OpenContext.create({
-    self: { publicKey: hex.from(swift.phonePublic), privateKey: hex.from(swift.phonePrivate) },
-    peerPublicKey: hex.from(swift.macPublic),
-    enc: hex.from(swift.macEnc),
-    from: swift.macId,
-    to: swift.phoneId,
-    info: freshLinkInfo(swift.macId, swift.phoneId, swift.macNonce, swift.phoneNonce),
-  });
-  const header = envelopeBytes.subarray(0, envelopeBytes.byteLength - envelope.body.byteLength);
-  expect(await opener.open(header, envelope.body)).toEqual(new Uint8Array([0, 0, 0, 0, 0, 0x42]));
-  expect(verifySignedPayload({
-    payload: new TextEncoder().encode(swift.authPayload),
-    alg: "ES256",
-    sig: swift.authSignature,
-    publicKey: { sig: swift.authPublicKey, sigAlg: "ES256" },
-  })).toEqual({ ok: true });
-}, 180_000);
+if (process.platform === "darwin") {
+  test("Swift FreshLink ciphertext and ES256 signatures interoperate with TypeScript", async () => {
+    const root = fileURLToPath(new URL("../../..", import.meta.url));
+    const result = spawnSync("swift", ["run", "--package-path", "packages/protocol/swift", "FreshLinkInteropFixture"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 180_000,
+    });
+    if (result.status !== 0) throw new Error(result.stderr || `Swift fixture exited ${result.status}`);
+    const swift = JSON.parse(result.stdout) as {
+      phoneId: string;
+      macId: string;
+      phonePrivate: string;
+      phonePublic: string;
+      macPublic: string;
+      macEnc: string;
+      macNonce: string;
+      phoneNonce: string;
+      ciphertext: string;
+      authPayload: string;
+      authPublicKey: string;
+      authSignature: string;
+    };
+    const envelopeBytes = hex.from(swift.ciphertext);
+    const envelope = decodeRelay(envelopeBytes);
+    const opener = await OpenContext.create({
+      self: { publicKey: hex.from(swift.phonePublic), privateKey: hex.from(swift.phonePrivate) },
+      peerPublicKey: hex.from(swift.macPublic),
+      enc: hex.from(swift.macEnc),
+      from: swift.macId,
+      to: swift.phoneId,
+      info: freshLinkInfo(swift.macId, swift.phoneId, swift.macNonce, swift.phoneNonce),
+    });
+    const header = envelopeBytes.subarray(0, envelopeBytes.byteLength - envelope.body.byteLength);
+    expect(await opener.open(header, envelope.body)).toEqual(new Uint8Array([0, 0, 0, 0, 0, 0x42]));
+    expect(verifySignedPayload({
+      payload: new TextEncoder().encode(swift.authPayload),
+      alg: "ES256",
+      sig: swift.authSignature,
+      publicKey: { sig: swift.authPublicKey, sigAlg: "ES256" },
+    })).toEqual({ ok: true });
+  }, 180_000);
+} else {
+  test.skip("Swift FreshLink ciphertext and ES256 signatures interoperate with TypeScript (macOS only)", () => {});
+}

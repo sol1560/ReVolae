@@ -21,6 +21,8 @@ try await client.connect(to: hubURL, token: token)
 
 `status`、`peers` 和 `readyPeers` 暴露传输状态、已 pin 对端及链路就绪状态。两种角色都在认证后收到对端在线 presence 时，各自发送一次 FreshLink hello。`peer.keys` 只检查现有 pin；未知密钥或被替换的密钥会触发安全事件，不会被自动信任。离线 presence 或传输断开会清除会话。宿主应在 `onTransportEnded` / `onPeerUnavailable` 中取消任务；核心不会悄悄重放帧。`send(_:to:)` 仅向链路就绪且已 pin 的对端发送生成的 `AnyMessage`；`sendFrame(_:to:)` 可发送其他 `Frame`。非控制帧通过 `onFrame` 回调。
 
+`trustedPeer(deviceId:)` 可读取已 pin 对端供本地审批校验使用；`declinePair(deviceId:phoneId:)` 清除对应待配对请求并发送拒绝确认。
+
 ## 配对
 
 设备调用 `makePairOffer()`，返回可用于二维码或手动转发的 JSON，内容包括当前 hub URL、身份公钥、随机 16 字节 secret，以及最多五分钟的过期时间。手机调用 `acceptPairOffer(json:phoneName:)` 校验 URL、公钥长度和过期时间，计算协议 HMAC，暂存配对并发送 `pair.request`。设备通过 `pendingPairRequest` / `onPendingPairRequest` 展示待确认请求；只有本地用户确认后才调用 `confirmPair(deviceId:phoneId:)`。
@@ -29,6 +31,10 @@ try await client.connect(to: hubURL, token: token)
 
 `PairingCrypto`、`PeerTrustStore` 和 `PairingCoordinator` 可配合内存版 `SecureValueStore` 使用，无需 Keychain 或网络即可测试。
 
+## 审批签名
+
+`ApprovalSigning.validateRequest(_:)` 校验 approval-v1 challenge、run/step ID、动作详情哈希、nonce 和有效期；`signDecision(for:allow:identity:now:)` 生成 `remember: .once` 的 ES256 决定；`verifyDecision(_:for:owner:now:)` 针对 pin 的手机签名公钥验证。helper 不执行生物识别：手机 UI 必须先用 `LAContext` 完成用户认证，再允许 `allow: true` 的决定。
+
 ## 原生宿主边界
 
-后续 macOS 宿主可用 `onControl` 作为受授权工具的边界，例如 `shell.run`、`applescript.run`、`shortcuts.run`、`fs.read` 和 `fs.list`；核心本身不执行这些工具。Apple Events/TCC 授权由未来的宿主处理，不自动回退到盲目 CUA。Brain `--native` 模式保持谨慎：拒绝、策略阻止或工具失败都会结束任务。
+`packages/macos` 的 `CuaRemoteMac` 是无 UI 的 macOS 15 daemon，使用本地 provider 配置和 Brain `--native` 子进程。它仅接受配对且 ready 的 owner 控制；核心本身不执行工具。Apple Events/TCC 授权由宿主处理，不自动回退到盲目 CUA。Brain `--native` 模式保持谨慎：拒绝、策略阻止或工具失败都会结束任务。详见 [`packages/macos/README.md`](../packages/macos/README.md)。

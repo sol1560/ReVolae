@@ -158,6 +158,27 @@ final class PairingStateTests: XCTestCase {
         XCTAssertNil(try trust.peer(phoneIdentity.deviceId))
     }
 
+    func testDecliningPairClearsPendingRequestWithoutCreatingTrust() throws {
+        let deviceStorage = MemoryStore()
+        let phoneStorage = MemoryStore()
+        let deviceIdentity = try newIdentity(deviceStorage)
+        let phoneIdentity = try newIdentity(phoneStorage)
+        let hubURL = URL(string: "wss://hub.example/ws")!
+        let device = coordinator(role: .device, identity: deviceIdentity, hubURL: hubURL.absoluteString, store: deviceStorage)
+        let phone = coordinator(role: .phone, identity: phoneIdentity, hubURL: hubURL.absoluteString, store: phoneStorage)
+        let offer = try device.createOffer(hubURL: hubURL, name: "Mac", now: 100, allowInsecureLocalDevelopment: false)
+        let request = try phone.acceptOffer(json: offer, currentHubURL: hubURL, phoneName: "Phone", now: 101, allowInsecureLocalDevelopment: false)
+        _ = try device.stageDeviceRequest(request, now: 102)
+
+        let confirmation = try device.declinePair(deviceId: deviceIdentity.deviceId, phoneId: phoneIdentity.deviceId)
+        XCTAssertFalse(confirmation.accept)
+        XCTAssertNil(device.pendingReview)
+        XCTAssertNil(try PeerTrustStore(identityId: deviceIdentity.deviceId, hubURL: hubURL.absoluteString, store: deviceStorage).peer(phoneIdentity.deviceId))
+        XCTAssertThrowsError(try device.declinePair(deviceId: deviceIdentity.deviceId, phoneId: phoneIdentity.deviceId)) {
+            XCTAssertEqual($0 as? PairingError, .noPendingRequest)
+        }
+    }
+
     func testUnsolicitedPairResultDoesNotCreateTrust() throws {
         let storage = MemoryStore()
         let identity = try newIdentity(storage)

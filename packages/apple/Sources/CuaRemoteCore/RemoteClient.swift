@@ -31,21 +31,51 @@ public enum RemoteSecurityEvent: Equatable, Sendable {
     case freshLinkFailed(String)
 }
 
+private actor AsyncSendGate {
+    private var locked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !locked {
+            locked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            locked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+private struct ActivePeerLink {
+    let token: UUID
+    let generation: UInt64
+    let freshLink: FreshLink
+    let sendGate: AsyncSendGate
+}
+
 @MainActor
 public final class RemoteClient: ObservableObject {
+    private static let maximumWebSocketMessageBytes = 1_048_576
+
     @Published public private(set) var status: RemoteClientStatus = .disconnected
     @Published public private(set) var peers: [String: RemotePeerState] = [:]
     @Published public private(set) var pendingPairRequest: PairReview?
 
     public let role: RemoteRole
     public let identity: DeviceIdentity
-    public var onHubMessage: ((AnyMessage) -> Void)?
-    public var onControl: ((String, AnyMessage) -> Void)?
-    public var onFrame: ((String, Frame) -> Void)?
-    public var onSecurityEvent: ((RemoteSecurityEvent) -> Void)?
-    public var onTransportEnded: (() -> Void)?
-    public var onPendingPairRequest: ((PairReview) -> Void)?
-    public var onPeerUnavailable: ((String) -> Void)?
+    public var onHubMessage: (@MainActor (AnyMessage) -> Void)?
+    public var onControl: (@MainActor (String, AnyMessage) -> Void)?
+    public var onFrame: (@MainActor (String, Frame) -> Void)?
+    public var onSecurityEvent: (@MainActor (RemoteSecurityEvent) -> Void)?
+    public var onTransportEnded: (@MainActor () -> Void)?
+    public var onPendingPairRequest: (@MainActor (PairReview) -> Void)?
+    public var onPeerUnavailable: (@MainActor (String) -> Void)?
 
     private let name: String
     private let platform: DevicePlatform
@@ -58,7 +88,8 @@ public final class RemoteClient: ObservableObject {
     private var authenticationChallengeReceived = false
     private var trustStore: PeerTrustStore?
     private var pairing: PairingCoordinator?
-    private var links: [String: FreshLink] = [:]
+    private var links: [String: ActivePeerLink] = [:]
+    private var blockedPeers: Set<String> = []
 
     public init(
         role: RemoteRole,
@@ -104,6 +135,7 @@ public final class RemoteClient: ObservableObject {
         self.trustStore = trust
         self.pairing = PairingCoordinator(role: role, identity: identity, trust: trust)
         self.peers = [:]
+        self.blockedPeers.removeAll()
         self.status = .connecting
 
         let urlSession = URLSession(configuration: .ephemeral)
@@ -153,9 +185,30 @@ public final class RemoteClient: ObservableObject {
             throw RemoteClientError.peerNotReady(peerId)
         }
         let currentGeneration = generation
-        let envelope = try await link.seal(frame.encode())
-        guard currentGeneration == generation, let socket else { throw RemoteClientError.notConnected }
-        try await socket.send(.data(envelope))
+        let encodedFrame = try frame.encode()
+        guard encodedFrame.count <= Self.maximumWebSocketMessageBytes else {
+            throw RemoteClientError.webSocketMessageTooLarge
+        }
+        await link.sendGate.acquire()
+        do {
+            guard currentGeneration == generation,
+                  link.generation == currentGeneration,
+                  links[peerId]?.token == link.token,
+                  peers[peerId]?.ready == true,
+                  let socket else {
+                throw RemoteClientError.notConnected
+            }
+            let envelope = try await link.freshLink.seal(encodedFrame)
+            guard currentGeneration == generation, links[peerId]?.token == link.token else {
+                throw RemoteClientError.notConnected
+            }
+            try await socket.send(.data(envelope))
+            await link.sendGate.release()
+        } catch {
+            await link.sendGate.release()
+            if currentGeneration == generation, shouldFailClosed(error) { failClosed(error) }
+            throw error
+        }
     }
 
     public func makePairOffer(lifetime: Int = 300) throws -> String {
@@ -200,6 +253,17 @@ public final class RemoteClient: ObservableObject {
         try await sendHub(.pairConfirm(pairing.confirmPair(deviceId: deviceId, phoneId: phoneId)))
     }
 
+    public func declinePair(deviceId: String, phoneId: String) async throws {
+        guard role == .device, status == .connected, let pairing else { throw RemoteClientError.notConnected }
+        let confirmation = try pairing.declinePair(deviceId: deviceId, phoneId: phoneId)
+        pendingPairRequest = nil
+        try await sendHub(.pairConfirm(confirmation))
+    }
+
+    public func trustedPeer(deviceId: String) throws -> TrustedPeer? {
+        try trustStore?.peer(deviceId)
+    }
+
     public func unpair(_ peerId: String) async throws {
         guard status == .connected, let pairing else { throw RemoteClientError.notConnected }
         try pairing.removePeer(peerId)
@@ -224,8 +288,14 @@ public final class RemoteClient: ObservableObject {
                     guard self.generation == expected else { return }
                     switch message {
                     case .string(let text):
+                        guard text.utf8.count <= Self.maximumWebSocketMessageBytes else {
+                            throw RemoteClientError.webSocketMessageTooLarge
+                        }
                         try await self.handleHubText(Data(text.utf8), generation: expected)
                     case .data(let data):
+                        guard data.count <= Self.maximumWebSocketMessageBytes else {
+                            throw RemoteClientError.webSocketMessageTooLarge
+                        }
                         try await self.handleRelay(data, generation: expected)
                     @unknown default:
                         throw RemoteClientError.unsupportedWebSocketMessage
@@ -278,9 +348,7 @@ public final class RemoteClient: ObservableObject {
             let disposition = try pairing.apply(result, now: Int(Date().timeIntervalSince1970))
             if disposition == .pinMismatch {
                 let peerId = role == .device ? result.phoneId : result.deviceId
-                dropLink(peerId)
-                onSecurityEvent?(.peerKeyMismatch(peerId))
-                onPeerUnavailable?(peerId)
+                blockPeer(peerId)
             }
             pendingPairRequest = pairing.pendingReview
         case .pairRemoved(let removed):
@@ -302,6 +370,7 @@ public final class RemoteClient: ObservableObject {
     }
 
     private func handlePeerKeys(_ message: PeerKeys) throws {
+        guard !blockedPeers.contains(message.deviceId) else { return }
         guard let trustStore else { return }
         switch try trustStore.assess(deviceId: message.deviceId, keys: message.pubKeys) {
         case .trusted:
@@ -314,14 +383,13 @@ public final class RemoteClient: ObservableObject {
             onSecurityEvent?(.untrustedPeer(message.deviceId))
             onPeerUnavailable?(message.deviceId)
         case .mismatch:
-            dropLink(message.deviceId)
-            onSecurityEvent?(.peerKeyMismatch(message.deviceId))
-            onPeerUnavailable?(message.deviceId)
+            blockPeer(message.deviceId)
         }
     }
 
     private func handlePresence(_ message: Presence, generation expected: UInt64) async throws {
         if message.deviceId == identity.deviceId { return }
+        guard !blockedPeers.contains(message.deviceId) else { return }
         guard let trustStore else { return }
         guard let peer = try trustStore.peer(message.deviceId) else {
             dropLink(message.deviceId)
@@ -348,10 +416,10 @@ public final class RemoteClient: ObservableObject {
             peerId: message.deviceId,
             peerPublicKey: kem
         )
-        links[message.deviceId] = link
+        let activeLink = ActivePeerLink(token: UUID(), generation: expected, freshLink: link, sendGate: AsyncSendGate())
+        links[message.deviceId] = activeLink
         let hello = try await link.hello()
-        guard expected == generation, let socket else { return }
-        try await socket.send(.data(hello))
+        try await sendLinkData(hello, to: message.deviceId, link: activeLink, generation: expected)
     }
 
     private func handleRelay(_ data: Data, generation expected: UInt64) async throws {
@@ -360,16 +428,16 @@ public final class RemoteClient: ObservableObject {
             throw RemoteClientError.unknownPeer(envelope.from)
         }
         do {
-            let received = try await link.receive(data)
+            let received = try await link.freshLink.receive(data)
             guard expected == generation else { return }
             if let reply = received.reply {
-                guard let socket else { return }
-                try await socket.send(.data(reply))
+                try await sendLinkData(reply, to: envelope.from, link: link, generation: expected)
             }
-            guard let bytes = received.frame else { return }
             var state = peers[envelope.from] ?? RemotePeerState(id: envelope.from, name: envelope.from, online: true, ready: false)
-            state.ready = await link.ready
+            state.ready = await link.freshLink.ready
+            guard expected == generation, links[envelope.from]?.token == link.token else { return }
             peers[envelope.from] = state
+            guard let bytes = received.frame else { return }
             let frame = try Frame.decode(bytes)
             if frame.kind == .control {
                 onControl?(envelope.from, try frame.controlMessage())
@@ -383,20 +451,69 @@ public final class RemoteClient: ObservableObject {
             onPeerUnavailable?(envelope.from)
             throw error
         }
-        if await link.ready {
-            peers[envelope.from]?.ready = true
-        }
     }
 
     private func sendText<T: Encodable>(_ message: T, generation expected: UInt64) async throws {
         guard expected == generation, let socket else { throw RemoteClientError.notConnected }
         let data = try JSONEncoder().encode(message)
-        try await socket.send(.string(String(decoding: data, as: UTF8.self)))
+        guard data.count <= Self.maximumWebSocketMessageBytes else {
+            throw RemoteClientError.webSocketMessageTooLarge
+        }
+        do {
+            try await socket.send(.string(String(decoding: data, as: UTF8.self)))
+        } catch {
+            if expected == generation { failClosed(error) }
+            throw error
+        }
+    }
+
+    private func sendLinkData(
+        _ data: Data,
+        to peerId: String,
+        link: ActivePeerLink,
+        generation expected: UInt64
+    ) async throws {
+        guard data.count <= Self.maximumWebSocketMessageBytes else {
+            throw RemoteClientError.webSocketMessageTooLarge
+        }
+        await link.sendGate.acquire()
+        do {
+            guard expected == generation,
+                  link.generation == expected,
+                  links[peerId]?.token == link.token,
+                  let socket else {
+                throw RemoteClientError.notConnected
+            }
+            try await socket.send(.data(data))
+            await link.sendGate.release()
+        } catch {
+            await link.sendGate.release()
+            if expected == generation, shouldFailClosed(error) { failClosed(error) }
+            throw error
+        }
+    }
+
+    private func shouldFailClosed(_ error: Error) -> Bool {
+        guard let error = error as? RemoteClientError else { return true }
+        switch error {
+        case .notConnected, .peerNotReady, .webSocketMessageTooLarge:
+            return false
+        default:
+            return true
+        }
     }
 
     private func dropLink(_ peerId: String) {
         links[peerId] = nil
         peers[peerId]?.ready = false
+    }
+
+    private func blockPeer(_ peerId: String) {
+        blockedPeers.insert(peerId)
+        dropLink(peerId)
+        peers[peerId]?.online = false
+        onSecurityEvent?(.peerKeyMismatch(peerId))
+        onPeerUnavailable?(peerId)
     }
 
     private func closeTransport(notify: Bool) {
@@ -405,6 +522,8 @@ public final class RemoteClient: ObservableObject {
         session?.invalidateAndCancel()
         session = nil
         links.removeAll()
+        blockedPeers.removeAll()
+        pendingPairRequest = nil
         authenticationChallengeReceived = false
         for key in peers.keys {
             peers[key]?.online = false
@@ -440,6 +559,7 @@ public enum RemoteClientError: Error, Equatable {
     case peerNotReady(String)
     case unknownPeer(String)
     case invalidPeerKey
+    case webSocketMessageTooLarge
     case unsupportedWebSocketMessage
     case unexpectedHubMessage
     case authenticationRejected(String)

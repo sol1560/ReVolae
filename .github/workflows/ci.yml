@@ -6,6 +6,19 @@ on:
   pull_request:
 
 jobs:
+  apple:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test packages/protocol/test/fresh-link.test.ts
+      - run: swift test --package-path packages/protocol/swift
+      - run: swift test --package-path packages/apple
+      - run: swift test --package-path packages/macos
+
   typescript:
     runs-on: ubuntu-latest
     steps:

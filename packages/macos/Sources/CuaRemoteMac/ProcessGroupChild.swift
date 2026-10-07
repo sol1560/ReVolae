@@ -1,0 +1,309 @@
+import Darwin
+import Dispatch
+import Foundation
+
+final class ProcessGroupChild: @unchecked Sendable {
+    private let pid: pid_t
+    private let stdinDescriptor: Int32
+    private let stateLock = NSLock()
+    private var processExited = false
+    private var stdoutEOF = false
+    private var stderrEOF = false
+    private var exitStatus: Int32?
+    private var stderrBytes = 0
+    private var stderrBuffer = Data()
+    private var stdoutPending = Data()
+    private var stdoutBytes = 0
+    private var stdoutOverflowed = false
+    private var stdinOpen = true
+    private var exitNotified = false
+    private var stdoutHandler: (@Sendable (Data) -> Void)?
+    private var exitHandler: (@Sendable (Int32) -> Void)?
+    private let stdoutSource: DispatchSourceRead
+    private let stderrSource: DispatchSourceRead
+    private let processSource: DispatchSourceProcess
+
+    private init(pid: pid_t, stdin: Int32, stdout: Int32, stderr: Int32) {
+        self.pid = pid
+        self.stdinDescriptor = stdin
+        let queue = DispatchQueue(label: "CuaRemoteMac.process.\(pid)", qos: .userInitiated)
+        stdoutSource = DispatchSource.makeReadSource(fileDescriptor: stdout, queue: queue)
+        stderrSource = DispatchSource.makeReadSource(fileDescriptor: stderr, queue: queue)
+        processSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
+
+        stdoutSource.setEventHandler { [weak self] in self?.drain(stdout, isStdout: true) }
+        stderrSource.setEventHandler { [weak self] in self?.drain(stderr, isStdout: false) }
+        stdoutSource.setCancelHandler { Darwin.close(stdout) }
+        stderrSource.setCancelHandler { Darwin.close(stderr) }
+        processSource.setEventHandler { [weak self] in self?.reap() }
+        stdoutSource.resume()
+        stderrSource.resume()
+        processSource.resume()
+    }
+
+    static func spawn(
+        executable: String,
+        arguments: [String],
+        workingDirectory: URL,
+        environment: [String: String]
+    ) throws -> ProcessGroupChild {
+        _ = signal(SIGPIPE, SIG_IGN)
+        var stdinPipe = [Int32](repeating: -1, count: 2)
+        var stdoutPipe = [Int32](repeating: -1, count: 2)
+        var stderrPipe = [Int32](repeating: -1, count: 2)
+        guard pipe(&stdinPipe) == 0 else { throw posixError() }
+        guard pipe(&stdoutPipe) == 0 else {
+            stdinPipe.forEach { close($0) }
+            throw posixError()
+        }
+        guard pipe(&stderrPipe) == 0 else {
+            (stdinPipe + stdoutPipe).forEach { close($0) }
+            throw posixError()
+        }
+        var shouldClosePipes = true
+        defer {
+            if shouldClosePipes {
+                for descriptor in stdinPipe + stdoutPipe + stderrPipe where descriptor >= 0 {
+                    close(descriptor)
+                }
+            }
+        }
+        for descriptor in stdinPipe + stdoutPipe + stderrPipe {
+            let flags = fcntl(descriptor, F_GETFD)
+            guard flags >= 0, fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) >= 0 else {
+                throw posixError()
+            }
+        }
+        for descriptor in [stdoutPipe[0], stderrPipe[0]] {
+            let flags = fcntl(descriptor, F_GETFL)
+            guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+                throw posixError()
+            }
+        }
+
+        var actions: posix_spawn_file_actions_t?
+        guard posix_spawn_file_actions_init(&actions) == 0 else { throw posixError() }
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        guard posix_spawn_file_actions_adddup2(&actions, stdinPipe[0], STDIN_FILENO) == 0,
+              posix_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO) == 0,
+              posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO) == 0 else {
+            throw posixError()
+        }
+        for descriptor in [stdinPipe[0], stdinPipe[1], stdoutPipe[0], stdoutPipe[1], stderrPipe[0], stderrPipe[1]] {
+            if descriptor != STDIN_FILENO && descriptor != STDOUT_FILENO && descriptor != STDERR_FILENO {
+                guard posix_spawn_file_actions_addclose(&actions, descriptor) == 0 else { throw posixError() }
+            }
+        }
+
+        var attributes: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attributes) == 0 else { throw posixError() }
+        defer { posix_spawnattr_destroy(&attributes) }
+        guard posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP)) == 0,
+              posix_spawnattr_setpgroup(&attributes, 0) == 0 else {
+            throw posixError()
+        }
+
+        let launcher = "/bin/sh"
+        let launchScript = "cd \"$1\" || exit; shift; exec \"$@\""
+        let launchArguments = ["-c", launchScript, "cuaremote-launch", workingDirectory.path, executable] + arguments
+        let argvStrings = [launcher] + launchArguments
+        let environmentStrings = environment.keys.sorted().map { "\($0)=\(environment[$0] ?? "")" }
+        var argv = argvStrings.map { strdup($0) } + [nil]
+        var envp = environmentStrings.map { strdup($0) } + [nil]
+        defer {
+            for pointer in argv where pointer != nil { free(pointer) }
+            for pointer in envp where pointer != nil { free(pointer) }
+        }
+
+        var child: pid_t = 0
+        let spawnResult = argv.withUnsafeMutableBufferPointer { argvBuffer in
+            envp.withUnsafeMutableBufferPointer { envBuffer in
+                posix_spawn(&child, launcher, &actions, &attributes, argvBuffer.baseAddress, envBuffer.baseAddress)
+            }
+        }
+        guard spawnResult == 0 else {
+            errno = spawnResult
+            throw posixError()
+        }
+
+        close(stdinPipe[0])
+        close(stdoutPipe[1])
+        close(stderrPipe[1])
+        shouldClosePipes = false
+        return ProcessGroupChild(pid: child, stdin: stdinPipe[1], stdout: stdoutPipe[0], stderr: stderrPipe[0])
+    }
+
+    func write(_ data: Data) throws {
+        guard data.count <= 1_048_576 else { throw ProcessGroupError.messageTooLarge }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        var offset = 0
+        try data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            while offset < bytes.count {
+                let count = Darwin.write(stdinDescriptor, base.advanced(by: offset), bytes.count - offset)
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw Self.posixError()
+                }
+                guard count > 0 else { throw ProcessGroupError.closedPipe }
+                offset += count
+            }
+        }
+    }
+
+    func installHandlers(
+        onStdout: @escaping @Sendable (Data) -> Void,
+        onExit: @escaping @Sendable (Int32) -> Void
+    ) {
+        stateLock.lock()
+        stdoutHandler = onStdout
+        exitHandler = onExit
+        let pending = stdoutPending
+        stdoutPending.removeAll()
+        let ready = processExited && stdoutEOF && stderrEOF && !exitNotified
+        if ready { exitNotified = true }
+        let status = exitStatus
+        stateLock.unlock()
+        if !pending.isEmpty { onStdout(pending) }
+        if ready, let status { onExit(status) }
+    }
+
+    func closeInput() {
+        _ = closeStdin()
+    }
+
+    func terminate() {
+        _ = kill(-pid, SIGTERM)
+        closeInput()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [pid] in
+            _ = kill(-pid, SIGKILL)
+        }
+    }
+
+    func stderrSnapshot() -> Data {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return stderrBuffer
+    }
+
+    private func closeStdin() -> Int32 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard stdinOpen else { return 0 }
+        stdinOpen = false
+        return close(stdinDescriptor)
+    }
+
+    private func drain(_ descriptor: Int32, isStdout: Bool) {
+        var ended = false
+        var result = Data()
+        var buffer = [UInt8](repeating: 0, count: 16_384)
+        while true {
+            let count = Darwin.read(descriptor, &buffer, buffer.count)
+            if count > 0 {
+                if isStdout {
+                    stateLock.lock()
+                    let remaining = max(0, 8_388_608 - stdoutBytes)
+                    let captured = min(remaining, count)
+                    if captured > 0 { result.append(contentsOf: buffer[0..<captured]) }
+                    stdoutBytes += captured
+                    if captured < count, !stdoutOverflowed {
+                        stdoutOverflowed = true
+                        result.append(Data(repeating: 0, count: 1_048_577))
+                    }
+                    stateLock.unlock()
+                } else {
+                    stateLock.lock()
+                    let remaining = max(0, 65_536 - stderrBytes)
+                    let captured = min(remaining, count)
+                    if captured > 0 { stderrBuffer.append(contentsOf: buffer[0..<captured]) }
+                    stderrBytes += captured
+                    stateLock.unlock()
+                }
+                continue
+            }
+            if count == 0 {
+                ended = true
+                break
+            }
+            if errno == EINTR { continue }
+            break
+        }
+        var stdoutCallback: (@Sendable (Data) -> Void)?
+        if isStdout, !result.isEmpty {
+            stateLock.lock()
+            stdoutCallback = stdoutHandler
+            if stdoutCallback == nil {
+                let remaining = max(0, 1_048_577 - stdoutPending.count)
+                stdoutPending.append(contentsOf: result.prefix(remaining))
+                if result.count > remaining {
+                    stdoutPending.append(Data(repeating: 0, count: 1_048_577))
+                }
+            }
+            stateLock.unlock()
+            stdoutCallback?(result)
+        }
+        if ended {
+            if isStdout {
+                stateLock.lock()
+                stdoutEOF = true
+                stateLock.unlock()
+                stdoutSource.cancel()
+            } else {
+                stateLock.lock()
+                stderrEOF = true
+                stateLock.unlock()
+                stderrSource.cancel()
+            }
+            finishIfReady()
+        }
+    }
+
+    private func reap() {
+        var status: Int32 = 0
+        _ = waitpid(pid, &status, 0)
+        stateLock.lock()
+        processExited = true
+        exitStatus = status
+        stateLock.unlock()
+        processSource.cancel()
+        finishIfReady()
+    }
+
+    private func finishIfReady() {
+        stateLock.lock()
+        let ready = processExited && stdoutEOF && stderrEOF
+        let shouldNotify = ready && !exitNotified && exitHandler != nil
+        if shouldNotify { exitNotified = true }
+        let status = shouldNotify ? exitStatus : nil
+        let callback = exitHandler
+        stateLock.unlock()
+        if let status { callback?(status) }
+    }
+
+    private static func posixError() -> NSError {
+        NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    }
+
+    deinit {
+        closeInput()
+    }
+}
+
+enum ProcessGroupError: Error {
+    case messageTooLarge
+    case closedPipe
+}
+
+func processExitedNormally(_ status: Int32) -> Bool {
+    status & 0x7f == 0
+}
+
+func processExitCode(_ status: Int32) -> Int32 {
+    (status >> 8) & 0xff
+}
+
+private func posixError() -> NSError {
+    NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+}

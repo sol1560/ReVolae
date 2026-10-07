@@ -318,6 +318,23 @@ public final class PairingCoordinator {
         )
     }
 
+    public func declinePair(deviceId: String, phoneId: String) throws -> PairConfirm {
+        guard role == .device,
+              let pending = pendingDevice,
+              pending.request.deviceId == deviceId,
+              pending.request.phoneId == phoneId else {
+            throw PairingError.noPendingRequest
+        }
+        pendingDevice = nil
+        deviceOffer = nil
+        return PairConfirm(
+            id: UUID().uuidString.lowercased(),
+            deviceId: deviceId,
+            phoneId: phoneId,
+            accept: false
+        )
+    }
+
     public func apply(_ result: PairResult, now: Int) throws -> PairResultDisposition {
         if role == .device,
            let pending = pendingDevice,
