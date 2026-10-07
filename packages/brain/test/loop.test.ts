@@ -21,6 +21,30 @@ function setup(autonomy: "cautious" | "balanced" | "handsoff", gate?: ApprovalGa
 const types = (events: BrainEvent[]) => events.map((e) => e.type);
 
 describe("agent loop（mock 模型 + 本地宿主）", () => {
+  test("取消等待审批的任务后，即使批准也不能调用工具", async () => {
+    const ctrl = new AbortController();
+    const { deps } = setup("balanced", { request: async () => {
+      ctrl.abort();
+      return { allow: true, remember: "once" };
+    } });
+    let calls = 0;
+    deps.host.call = async () => { calls++; throw new Error("不应执行"); };
+    const out = await runIntent({ ...deps, signal: ctrl.signal }, { deviceId: "d", intent: "shell: echo cancelled", mode: "agent" });
+    expect(calls).toBe(0);
+    expect(out.ok).toBe(false);
+    expect(out.cancelled).toBe(true);
+  });
+
+  test("原生模式拒绝后结束任务，不能由模型把失败改写为成功", async () => {
+    const { deps } = setup("balanced", { request: async () => ({ allow: false, remember: "once" }) });
+    let calls = 0;
+    deps.host.call = async () => { calls++; throw new Error("不应执行"); };
+    const out = await runIntent({ ...deps, stopOnFailure: true }, { deviceId: "d", intent: "shell: echo denied", mode: "agent" });
+    expect(calls).toBe(0);
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain("拒绝");
+  });
+
   test("放手档：一步 shell 直接执行并回传输出", async () => {
     const { deps, events } = setup("handsoff");
     const out = await runIntent(deps, { deviceId: "d", intent: "shell: echo hello-loop", mode: "agent" });

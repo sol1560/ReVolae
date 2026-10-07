@@ -27,7 +27,7 @@ const defaultProvider = flag("provider") ?? process.env.CUAREMOTE_PROVIDER ?? "a
 const logPath = flag("log") ?? join(homedir(), ".cuaremote", "logs", `brain-${new Date().toISOString().slice(0, 10)}.jsonl`);
 
 if (flag("mode") === "host") {
-  await runHostMode({ defaultProvider, logPath, cuaArgv: flag("cua")?.split(" ") });
+  await runHostMode({ defaultProvider, logPath, cuaArgv: flag("cua")?.split(" "), native: has("native") });
 } else if (argv[0] === "tools") {
   const host = new LocalBunHost();
   const { tools, scope } = await host.listTools();

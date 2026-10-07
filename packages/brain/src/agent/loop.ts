@@ -36,6 +36,7 @@ export interface AgentDeps {
   limits?: { maxSteps?: number; maxUsd?: number; approvalTtlSec?: number };
   platform?: string;
   signal?: AbortSignal;
+  stopOnFailure?: boolean;
 }
 
 export interface RunInput {
@@ -119,7 +120,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   const recent: string[] = [];
   const plan: PlanStep[] = [];
   let stepCount = 0;
-  let cancelled = false;
+  let cancelled = deps.signal?.aborted ?? false;
   deps.signal?.addEventListener("abort", () => (cancelled = true));
 
   const { tools: hostTools, scope } = await deps.host.listTools();
@@ -240,6 +241,8 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       const challenge = approvalChallenge({ runId, stepId: step.id, actionDetail: action.detail, nonce, expiresAt });
       deps.emit({ type: "step.approval_required", runId, stepId: step.id, level: decision.level, action, reason: decision.reason, expiresAt, challenge });
       const a = await deps.approvals.request({ runId, stepId: step.id, level: decision.level, action, reason: decision.reason, challenge, expiresAt });
+      if (cancelled || deps.signal?.aborted) return finish(false, "任务已取消；未执行待批准的操作");
+      if (Math.floor(Date.now() / 1000) >= expiresAt) return finish(false, "审批已过期；未执行操作");
       if (a.allow && a.remember === "always" && decision.level < 2) deps.policy.remember(action);
       verdict = a.allow ? "allow" : "deny";
       if (!a.allow) {
@@ -248,6 +251,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
         messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: "用户拒绝了这个操作。请换一种不需要这个操作的办法，或者停止并说明。" }] });
         recent.push(`拒绝: ${action.summary}`);
         planCursor = stepIdx + 1;
+        if (deps.stopOnFailure) return finish(false, "用户拒绝了操作");
         continue;
       }
     }
@@ -257,10 +261,12 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: `系统策略拒绝：${decision.reason}` }] });
       recent.push(`策略拒绝: ${action.summary}`);
       planCursor = stepIdx + 1;
+      if (deps.stopOnFailure) return finish(false, decision.reason);
       continue;
     }
 
     // 执行
+    if (cancelled || deps.signal?.aborted) return finish(false, "任务已取消；未执行操作");
     let result: ToolResult;
     if (tool.name === "gui.act") result = await guiAct(deps, input.intent, call.args, recent, cost);
     else if (tool.name.startsWith("gui.") && deps.gui) result = await deps.gui.call(tool.name, call.args);
@@ -270,6 +276,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     const dataLeft = tool.dataLeavesDevice && deps.provider.info.tier !== "local";
     deps.emit({ type: "step.finished", runId, stepId: step.id, ok: result.ok, ms: Date.now() - t0, channel: tool.channel, cost: { ...cost }, dataLeftDevice: dataLeft, output: result.output?.slice(0, 4000), error: result.error });
     deps.log?.({ t: "step.finished", runId, stepId: step.id, tool: tool.name, ok: result.ok, ms: Date.now() - t0, output: result.output?.slice(0, 2000), error: result.error });
+    if (!result.ok && deps.stopOnFailure) return finish(false, result.error ?? "工具执行失败；未自动重试");
     recent.push(`${result.ok ? "成功" : "失败"}: ${action.summary}`);
     planCursor = stepIdx + 1;
 

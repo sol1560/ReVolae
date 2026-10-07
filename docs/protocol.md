@@ -20,6 +20,12 @@
 2. **端 ↔ 端（经 hub 中继）**：WS 二进制帧 = `RelayEnvelope`（`[u8 1][u8 toLen][to][u8 fromLen][from][u8 flags][body]`），hub 只读 `to`，把 `body` 原样转给对端。`body` 是 HPKE 密封后的 `Frame`（`[u8 kind][u32 streamId][payload]`）。kind 0 控制 JSON（`PeerMessage` 联合）、1 PTY 字节、2 媒体帧。
 3. **大脑 ↔ 宿主（stdio）**：宿主（Swift daemon / hub 的云端大脑宿主 / M0 的 TS 本地宿主）spawn `brain --mode host`，双向 JSON lines（每行一个 `AnyMessage`）。
 
+## 端到端 FreshLink v2
+
+每次 WebSocket 传输代次各创建一个 FreshLink；断线或重连后不复用 HPKE 上下文，也不重放应用数据。两端先各发一次明文 `RelayEnvelope`：`{"v":2,"type":"hello","nonce":"<64 位小写十六进制>"}`。收到对端 hello 后，以 `HPKE Auth`（X25519 / HKDF-SHA256 / ChaCha20-Poly1305）建立双向发送与接收上下文，并回复 `{"v":2,"type":"key","nonce":"<本端 nonce>","peerNonce":"<对端 nonce>","enc":"<64 位小写十六进制>"}`。字段必须精确匹配对应消息；v1、重复或乱序握手、nonce 不匹配都会使该代次失效。
+
+HPKE `info` 是 UTF-8 `cuaremote-link-v2\n<from>\n<to>\n<senderNonce>\n<receiverNonce>`。每个密文的 AAD 是收到的**原始且已验证** RelayEnvelope header 字节；flags 只允许 bit 0，路由 ID 必须是有效 UTF-8、非空、≤255 字节且不能含 CR/LF，非规范封套头拒绝。`packages/protocol/src/fresh-link.ts` 与 Swift `FreshLink` 共用这些约束。`packages/protocol/scripts/gen-fixtures.ts` 产生仅供测试的固定密钥/nonce HPKE 向量；生产 API 不提供确定性随机数覆盖。
+
 ## 大脑 ↔ 宿主的路由规则（宿主实现）
 
 宿主是「哑管道 + 工具执行器」，不做决策：

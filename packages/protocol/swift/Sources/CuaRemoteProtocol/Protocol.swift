@@ -509,7 +509,7 @@ public struct PlanStep: Codable, Sendable {
 
 public enum PrecheckSource: String, Codable, Sendable, CaseIterable {
     case jev = "jev"
-    case static = "static"
+    case `static` = "static"
     case cache = "cache"
     case fallback = "fallback"
 }

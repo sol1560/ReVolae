@@ -2,14 +2,18 @@ import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { approvalChallenge, approvalSignedPayload, controlFrame, encodeMediaFrame, encodeRelay, terminalOpenChallenge } from "../src/index.js";
 import { E2ELink, SealContext, deriveKemKeyPair, hex, relayHeader, sessionInfo } from "../src/hpke.js";
-import { signApproval } from "../src/approval.js";
+import { freshLinkInfo } from "../src/fresh-link.js";
+import { signApproval, signPayload } from "../src/approval.js";
+import { hubAuthPayload, pairHmac } from "../src/pairing.js";
 import { p256 } from "@noble/curves/nist.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 
 const swiftDir = join(import.meta.dir, "..", "swift", "Tests", "CuaRemoteProtocolTests", "fixtures");
 const tsDir = join(import.meta.dir, "..", "fixtures");
+const appleDir = join(import.meta.dir, "..", "..", "apple", "Tests", "CuaRemoteCoreTests", "fixtures");
 mkdirSync(swiftDir, { recursive: true });
 mkdirSync(tsDir, { recursive: true });
+mkdirSync(appleDir, { recursive: true });
 
 const messages = [
   { v: 1, id: "m1", type: "intent.submit", text: "列出桌面上的 pdf", deviceId: "mac-1", mode: "agent" },
@@ -75,6 +79,45 @@ writeFileSync(join(tsDir, "hpke.json"), JSON.stringify({
   exporter: { context: hex.to(new TextEncoder().encode("cuaremote-export-test")), length: 32, value: hex.to(exported) },
 }, null, 2));
 
+// ---- FreshLink v2 互通向量：固定静态密钥、握手 nonce 与 HPKE 临时密钥 ----
+const freshPhoneId = "phone-fresh-fixture";
+const freshMacId = "mac-fresh-fixture";
+const freshPhone = await deriveKemKeyPair(seed("21"));
+const freshMac = await deriveKemKeyPair(seed("22"));
+const freshPhoneNonce = "31".repeat(32);
+const freshMacNonce = "32".repeat(32);
+const freshInfo = freshLinkInfo(freshPhoneId, freshMacId, freshPhoneNonce, freshMacNonce);
+const freshAad = relayHeader({ to: freshMacId, from: freshPhoneId, encrypted: true });
+const freshSender = await SealContext.create({
+  self: freshPhone,
+  peerPublicKey: freshMac.publicKey,
+  from: freshPhoneId,
+  to: freshMacId,
+  info: freshInfo,
+  ekm: seed("23"),
+});
+const freshPlaintext = controlFrame({ v: 1, id: "fresh-fixture", type: "stats.get" });
+const freshCiphertext = await freshSender.seal(freshAad, freshPlaintext);
+const freshHandshake = (body: object) => encodeRelay({
+  to: freshMacId,
+  from: freshPhoneId,
+  encrypted: false,
+  body: new TextEncoder().encode(JSON.stringify(body)),
+});
+writeFileSync(join(tsDir, "fresh-link.json"), JSON.stringify({
+  note: "FreshLink v2：TS HPKE Auth 发送上下文，固定测试静态种子、双方 nonce 与 ekm；生产 FreshLink 不暴露随机数覆盖入口。",
+  phone: { id: freshPhoneId, publicKey: hex.to(freshPhone.publicKey), privateKey: hex.to(freshPhone.privateKey) },
+  mac: { id: freshMacId, publicKey: hex.to(freshMac.publicKey), privateKey: hex.to(freshMac.privateKey) },
+  phoneNonce: freshPhoneNonce,
+  macNonce: freshMacNonce,
+  info: hex.to(freshInfo),
+  aad: hex.to(freshAad),
+  hello: hex.to(freshHandshake({ v: 2, type: "hello", nonce: freshPhoneNonce })),
+  key: hex.to(freshHandshake({ v: 2, type: "key", nonce: freshPhoneNonce, peerNonce: freshMacNonce, enc: hex.to(freshSender.enc) })),
+  plaintext: hex.to(freshPlaintext),
+  ciphertext: hex.to(encodeRelay({ to: freshMacId, from: freshPhoneId, encrypted: true, body: freshCiphertext })),
+}, null, 2));
+
 // ---- 审批签名向量 ----
 const challenge = approvalChallenge({ runId: "r1", stepId: "s1", actionDetail: "rm -rf ~/x", nonce: "n0", expiresAt: 1700000000 });
 const es256Priv = seed("c3");
@@ -92,7 +135,29 @@ const approvals = [
   signature: signApproval({ challenge, allow: true, privateKey: priv, alg, keyId: `k-${alg}`, nonce: "n0", expiresAt: 1700000000 }),
   denySignature: signApproval({ challenge, allow: false, privateKey: priv, alg, keyId: `k-${alg}`, nonce: "n0", expiresAt: 1700000000 }),
 }));
-writeFileSync(join(tsDir, "approval.json"), JSON.stringify({ note: "ES256 签名为 64 字节 raw r||s（RFC 6979 确定性 k，lowS）；Ed25519 为 64 字节。签名消息 = signedPayload 的 UTF-8。", vectors: approvals }, null, 2));
+const authPayload = hubAuthPayload("swift-fixture", "test-nonce");
+writeFileSync(join(tsDir, "approval.json"), JSON.stringify({
+  note: "ES256 签名为 64 字节 raw r||s（RFC 6979 确定性 k，lowS）；Ed25519 为 64 字节。签名消息 = signedPayload 的 UTF-8。",
+  vectors: approvals,
+  hubAuth: {
+    payload: authPayload,
+    publicKey: hex.to(p256.getPublicKey(es256Priv, false)),
+    signature: signPayload(new TextEncoder().encode(authPayload), es256Priv, "ES256"),
+  },
+}, null, 2));
 
-for (const f of ["hpke.json", "approval.json", "rfc9180-a2-3.json"]) copyFileSync(join(tsDir, f), join(swiftDir, f));
+const pairingVector = {
+  secret: Buffer.from("00112233445566778899aabbccddeeff", "hex").toString("base64"),
+  deviceKem: Buffer.from("11".repeat(32), "hex").toString("base64"),
+  phoneKem: Buffer.from("22".repeat(32), "hex").toString("base64"),
+};
+writeFileSync(join(tsDir, "pairing.json"), JSON.stringify({
+  ...pairingVector,
+  hmac: pairHmac(pairingVector.secret, pairingVector.deviceKem, pairingVector.phoneKem),
+}, null, 2));
+
+for (const f of ["hpke.json", "approval.json", "fresh-link.json", "pairing.json", "rfc9180-a2-3.json"]) {
+  copyFileSync(join(tsDir, f), join(swiftDir, f));
+}
+copyFileSync(join(tsDir, "pairing.json"), join(appleDir, "pairing.json"));
 console.log("fixtures written");
