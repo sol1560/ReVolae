@@ -242,7 +242,11 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       deps.emit({ type: "step.approval_required", runId, stepId: step.id, level: decision.level, action, reason: decision.reason, expiresAt, challenge });
       const a = await deps.approvals.request({ runId, stepId: step.id, level: decision.level, action, reason: decision.reason, challenge, expiresAt });
       if (cancelled || deps.signal?.aborted) return finish(false, "任务已取消；未执行待批准的操作");
-      if (Math.floor(Date.now() / 1000) >= expiresAt) return finish(false, "审批已过期；未执行操作");
+      if (Math.floor(Date.now() / 1000) >= expiresAt) {
+        step.status = "failed";
+        deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error: "审批已过期；未执行操作" });
+        return finish(false, "审批已过期；未执行操作");
+      }
       if (a.allow && a.remember === "always" && decision.level < 2) deps.policy.remember(action);
       verdict = a.allow ? "allow" : "deny";
       if (!a.allow) {
