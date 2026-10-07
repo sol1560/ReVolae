@@ -33,6 +33,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.revolae.phone
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: ../ios/ReVolaePhoneSimulator.entitlements
         TARGETED_DEVICE_FAMILY: '1'
         INFOPLIST_KEY_CFBundleDisplayName: ReVolae
         INFOPLIST_KEY_NSCameraUsageDescription: 扫描你自己的 Mac 上显示的配对二维码。

@@ -13,7 +13,7 @@ xcodebuild -project apps/apple/ReVolae.xcodeproj -scheme ReVolaeMac \
   CODE_SIGN_IDENTITY=- build
 xcodebuild -project apps/apple/ReVolae.xcodeproj -scheme ReVolaePhone \
   -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath apps/apple/DerivedData CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath apps/apple/DerivedData CODE_SIGN_IDENTITY=- build
 ```
 
 XcodeGen 生成的工程、Info.plist 和 entitlements 一并提交；修改工程配置请先改 `project.yml` 再生成，不要手工改工程文件。真机在 Xcode 选择自己的 Team 和唯一 Bundle ID，签名、安装；模拟器构建不需要开发者账户。Mac 本地调试采用 ad-hoc 签名，分发需要自己的 Developer ID 与公证。

@@ -18,7 +18,7 @@ struct ReVolaePhoneApp: App {
             .task {
                 guard session == nil, startupError == nil else { return }
                 do { session = try PhoneSession() }
-                catch { startupError = "请先解锁设备，再重新打开应用。\(error.localizedDescription)" }
+                catch { startupError = "安全存储初始化失败。请确认设备已解锁且应用签名正确。\(error.localizedDescription)" }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { session?.disconnect() }

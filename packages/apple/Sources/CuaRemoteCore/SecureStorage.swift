@@ -58,6 +58,14 @@ public struct KeychainValueStore: SecureValueStore {
     }
 }
 
-public enum KeychainError: Error, Equatable {
+public enum KeychainError: Error, Equatable, LocalizedError {
     case status(OSStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .status(let status):
+            let message = SecCopyErrorMessageString(status, nil) as String? ?? "Keychain operation failed"
+            return "\(message) (OSStatus \(status))"
+        }
+    }
 }
