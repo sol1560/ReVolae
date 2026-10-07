@@ -3,9 +3,16 @@ import Dispatch
 import Foundation
 
 final class ProcessGroupChild: @unchecked Sendable {
+    private static let maximumWriteBytes = 1_048_576
+    private static let maximumQueuedWriteBytes = 4_194_304
+    private static let writePollTimeoutMilliseconds: Int32 = 100
+    private static let writeTimeout: TimeInterval = 10
+
     private let pid: pid_t
     private let stdinDescriptor: Int32
     private let stateLock = NSLock()
+    private let stdinWriteQueue: DispatchQueue
+    private let processQueue: DispatchQueue
     private var processExited = false
     private var stdoutEOF = false
     private var stderrEOF = false
@@ -16,6 +23,9 @@ final class ProcessGroupChild: @unchecked Sendable {
     private var stdoutBytes = 0
     private var stdoutOverflowed = false
     private var stdinOpen = true
+    private var stdinGeneration: UInt64 = 0
+    private var queuedWriteBytes = 0
+    private var terminationRequested = false
     private var exitNotified = false
     private var stdoutHandler: (@Sendable (Data) -> Void)?
     private var exitHandler: (@Sendable (Int32) -> Void)?
@@ -27,6 +37,8 @@ final class ProcessGroupChild: @unchecked Sendable {
         self.pid = pid
         self.stdinDescriptor = stdin
         let queue = DispatchQueue(label: "CuaRemoteMac.process.\(pid)", qos: .userInitiated)
+        processQueue = queue
+        stdinWriteQueue = DispatchQueue(label: "CuaRemoteMac.stdin.\(pid)", qos: .userInitiated)
         stdoutSource = DispatchSource.makeReadSource(fileDescriptor: stdout, queue: queue)
         stderrSource = DispatchSource.makeReadSource(fileDescriptor: stderr, queue: queue)
         processSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
@@ -51,14 +63,14 @@ final class ProcessGroupChild: @unchecked Sendable {
         var stdinPipe = [Int32](repeating: -1, count: 2)
         var stdoutPipe = [Int32](repeating: -1, count: 2)
         var stderrPipe = [Int32](repeating: -1, count: 2)
-        guard pipe(&stdinPipe) == 0 else { throw posixError() }
+        guard pipe(&stdinPipe) == 0 else { throw Self.posixError(errno) }
         guard pipe(&stdoutPipe) == 0 else {
             stdinPipe.forEach { close($0) }
-            throw posixError()
+            throw Self.posixError(errno)
         }
         guard pipe(&stderrPipe) == 0 else {
             (stdinPipe + stdoutPipe).forEach { close($0) }
-            throw posixError()
+            throw Self.posixError(errno)
         }
         var shouldClosePipes = true
         defer {
@@ -71,36 +83,36 @@ final class ProcessGroupChild: @unchecked Sendable {
         for descriptor in stdinPipe + stdoutPipe + stderrPipe {
             let flags = fcntl(descriptor, F_GETFD)
             guard flags >= 0, fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) >= 0 else {
-                throw posixError()
+                throw Self.posixError(errno)
             }
         }
-        for descriptor in [stdoutPipe[0], stderrPipe[0]] {
+        for descriptor in [stdinPipe[1], stdoutPipe[0], stderrPipe[0]] {
             let flags = fcntl(descriptor, F_GETFL)
             guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
-                throw posixError()
+                throw Self.posixError(errno)
             }
         }
 
         var actions: posix_spawn_file_actions_t?
-        guard posix_spawn_file_actions_init(&actions) == 0 else { throw posixError() }
+        guard posix_spawn_file_actions_init(&actions) == 0 else { throw Self.posixError(errno) }
         defer { posix_spawn_file_actions_destroy(&actions) }
         guard posix_spawn_file_actions_adddup2(&actions, stdinPipe[0], STDIN_FILENO) == 0,
               posix_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO) == 0,
               posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO) == 0 else {
-            throw posixError()
+            throw Self.posixError(errno)
         }
         for descriptor in [stdinPipe[0], stdinPipe[1], stdoutPipe[0], stdoutPipe[1], stderrPipe[0], stderrPipe[1]] {
             if descriptor != STDIN_FILENO && descriptor != STDOUT_FILENO && descriptor != STDERR_FILENO {
-                guard posix_spawn_file_actions_addclose(&actions, descriptor) == 0 else { throw posixError() }
+                guard posix_spawn_file_actions_addclose(&actions, descriptor) == 0 else { throw Self.posixError(errno) }
             }
         }
 
         var attributes: posix_spawnattr_t?
-        guard posix_spawnattr_init(&attributes) == 0 else { throw posixError() }
+        guard posix_spawnattr_init(&attributes) == 0 else { throw Self.posixError(errno) }
         defer { posix_spawnattr_destroy(&attributes) }
         guard posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP)) == 0,
               posix_spawnattr_setpgroup(&attributes, 0) == 0 else {
-            throw posixError()
+            throw Self.posixError(errno)
         }
 
         let launcher = "/bin/sh"
@@ -123,7 +135,7 @@ final class ProcessGroupChild: @unchecked Sendable {
         }
         guard spawnResult == 0 else {
             errno = spawnResult
-            throw posixError()
+            throw Self.posixError(errno)
         }
 
         close(stdinPipe[0])
@@ -133,22 +145,32 @@ final class ProcessGroupChild: @unchecked Sendable {
         return ProcessGroupChild(pid: child, stdin: stdinPipe[1], stdout: stdoutPipe[0], stderr: stderrPipe[0])
     }
 
-    func write(_ data: Data) throws {
-        guard data.count <= 1_048_576 else { throw ProcessGroupError.messageTooLarge }
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        var offset = 0
-        try data.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return }
-            while offset < bytes.count {
-                let count = Darwin.write(stdinDescriptor, base.advanced(by: offset), bytes.count - offset)
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    throw Self.posixError()
+    func write(_ data: Data) async throws {
+        guard data.count <= Self.maximumWriteBytes else { throw ProcessGroupError.messageTooLarge }
+        try Task.checkCancellation()
+
+        let generation = try reserveWrite(data.count)
+
+        let operation = ChildWriteOperation(data: data)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                operation.install(continuation)
+                stdinWriteQueue.async { [weak self] in
+                    guard let self else {
+                        operation.finish(.failure(ProcessGroupError.closedPipe))
+                        return
+                    }
+                    defer { self.releaseQueuedWriteBytes(data.count) }
+                    do {
+                        try self.performWrite(operation, generation: generation)
+                        operation.finish(.success(()))
+                    } catch {
+                        operation.finish(.failure(error))
+                    }
                 }
-                guard count > 0 else { throw ProcessGroupError.closedPipe }
-                offset += count
             }
+        } onCancel: {
+            operation.cancel()
         }
     }
 
@@ -174,10 +196,24 @@ final class ProcessGroupChild: @unchecked Sendable {
     }
 
     func terminate() {
-        _ = kill(-pid, SIGTERM)
+        stateLock.lock()
+        guard !terminationRequested else {
+            stateLock.unlock()
+            return
+        }
+        terminationRequested = true
+        if !processExited {
+            _ = Darwin.kill(-pid, SIGTERM)
+        }
+        stateLock.unlock()
         closeInput()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [pid] in
-            _ = kill(-pid, SIGKILL)
+        processQueue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.stateLock.lock()
+            if !self.processExited {
+                _ = Darwin.kill(-self.pid, SIGKILL)
+            }
+            self.stateLock.unlock()
         }
     }
 
@@ -189,10 +225,78 @@ final class ProcessGroupChild: @unchecked Sendable {
 
     private func closeStdin() -> Int32 {
         stateLock.lock()
-        defer { stateLock.unlock() }
-        guard stdinOpen else { return 0 }
+        guard stdinOpen else {
+            stateLock.unlock()
+            return 0
+        }
         stdinOpen = false
-        return close(stdinDescriptor)
+        stdinGeneration &+= 1
+        let result = Darwin.close(stdinDescriptor)
+        stateLock.unlock()
+        return result
+    }
+
+    private func performWrite(_ operation: ChildWriteOperation, generation: UInt64) throws {
+        let deadline = Date().addingTimeInterval(Self.writeTimeout)
+        var offset = 0
+        try operation.data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            while offset < bytes.count {
+                if operation.isCancelled { throw CancellationError() }
+                guard Date() < deadline else { throw ProcessGroupError.writeTimedOut }
+                guard inputIsOpen(generation: generation) else { throw ProcessGroupError.closedPipe }
+
+                var descriptor = pollfd(fd: stdinDescriptor, events: Int16(POLLOUT), revents: 0)
+                let ready = Darwin.poll(&descriptor, 1, Self.writePollTimeoutMilliseconds)
+                if ready < 0 {
+                    let code = errno
+                    if code == EINTR { continue }
+                    throw Self.posixError(code)
+                }
+                if ready == 0 { continue }
+                if descriptor.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 {
+                    throw ProcessGroupError.closedPipe
+                }
+
+                stateLock.lock()
+                guard stdinOpen, stdinGeneration == generation, !processExited else {
+                    stateLock.unlock()
+                    throw ProcessGroupError.closedPipe
+                }
+                let written = Darwin.write(stdinDescriptor, base.advanced(by: offset), bytes.count - offset)
+                let code = errno
+                stateLock.unlock()
+                if written < 0 {
+                    if code == EINTR || code == EAGAIN || code == EWOULDBLOCK { continue }
+                    throw Self.posixError(code)
+                }
+                guard written > 0 else { throw ProcessGroupError.closedPipe }
+                offset += written
+            }
+        }
+    }
+
+    private func inputIsOpen(generation: UInt64) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return stdinOpen && stdinGeneration == generation && !processExited
+    }
+
+    private func releaseQueuedWriteBytes(_ count: Int) {
+        stateLock.lock()
+        queuedWriteBytes -= count
+        stateLock.unlock()
+    }
+
+    private func reserveWrite(_ count: Int) throws -> UInt64 {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard stdinOpen, !processExited else { throw ProcessGroupError.closedPipe }
+        guard count <= Self.maximumQueuedWriteBytes - queuedWriteBytes else {
+            throw ProcessGroupError.writeQueueFull
+        }
+        queuedWriteBytes += count
+        return stdinGeneration
     }
 
     private func drain(_ descriptor: Int32, isStdout: Bool) {
@@ -262,10 +366,21 @@ final class ProcessGroupChild: @unchecked Sendable {
 
     private func reap() {
         var status: Int32 = 0
-        _ = waitpid(pid, &status, 0)
         stateLock.lock()
+        let result = waitpid(pid, &status, WNOHANG)
+        if result == 0 || (result < 0 && errno == EINTR) {
+            stateLock.unlock()
+            processQueue.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in self?.reap() }
+            return
+        }
+        if result < 0 { status = Int32(errno) }
         processExited = true
         exitStatus = status
+        if stdinOpen {
+            stdinOpen = false
+            stdinGeneration &+= 1
+            _ = Darwin.close(stdinDescriptor)
+        }
         stateLock.unlock()
         processSource.cancel()
         finishIfReady()
@@ -282,8 +397,8 @@ final class ProcessGroupChild: @unchecked Sendable {
         if let status { callback?(status) }
     }
 
-    private static func posixError() -> NSError {
-        NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    private static func posixError(_ code: Int32) -> NSError {
+        NSError(domain: NSPOSIXErrorDomain, code: Int(code))
     }
 
     deinit {
@@ -293,7 +408,63 @@ final class ProcessGroupChild: @unchecked Sendable {
 
 enum ProcessGroupError: Error {
     case messageTooLarge
+    case writeQueueFull
+    case writeTimedOut
     case closedPipe
+}
+
+private final class ChildWriteOperation: @unchecked Sendable {
+    let data: Data
+
+    private let lock = NSLock()
+    private var cancellationRequested = false
+    private var completed = false
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancellationRequested
+    }
+
+    func install(_ continuation: CheckedContinuation<Void, Error>) {
+        lock.lock()
+        if cancellationRequested {
+            completed = true
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let pending = completed ? nil : continuation
+        if pending != nil { completed = true }
+        continuation = nil
+        lock.unlock()
+        pending?.resume(throwing: CancellationError())
+    }
+
+    func finish(_ result: Result<Void, Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(with: result)
+    }
 }
 
 func processExitedNormally(_ status: Int32) -> Bool {

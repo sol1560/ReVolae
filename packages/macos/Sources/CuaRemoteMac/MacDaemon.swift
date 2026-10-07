@@ -75,6 +75,10 @@ public final class MacDaemon: ObservableObject {
     private var activeCancellation: RunCancellation?
     private var activeToken: UUID?
     private var brainOutput = Data()
+    private var brainOutputQueue: [Data] = []
+    private var brainOutputQueueBytes = 0
+    private var brainDrainTask: Task<Void, Never>?
+    private var brainDrainToken: UUID?
     private var grants = ApprovalGrantLedger()
 
     public init(
@@ -128,7 +132,7 @@ public final class MacDaemon: ObservableObject {
     public func disconnect() {
         interruptActiveRun(summary: "interrupted, effects may remain", status: .interrupted, notifyPeer: false)
         client.disconnect()
-        state = .idle
+        if state != .failed { state = .idle }
     }
 
     public func stopCurrentRun() {
@@ -189,6 +193,7 @@ public final class MacDaemon: ObservableObject {
         do {
             try journal.insert(record)
         } catch {
+            persistenceFailed()
             await reject(messageId: submit.id, code: "journal_failed", from: peerId)
             return
         }
@@ -197,7 +202,7 @@ public final class MacDaemon: ObservableObject {
         state = .running
         let token = UUID()
         activeToken = token
-        brainOutput.removeAll()
+        resetBrainOutput(token: token)
         grants.clearAll()
         let cancellation = RunCancellation()
         activeCancellation = cancellation
@@ -216,7 +221,7 @@ public final class MacDaemon: ObservableObject {
                 onStdout: { [weak self, weak child] data in
                     guard let child else { return }
                     Task { @MainActor [weak self] in
-                        await self?.consumeBrainOutput(data, from: child, token: token)
+                        self?.enqueueBrainOutput(data, from: child, token: token)
                     }
                 },
                 onExit: { [weak self] status in
@@ -231,14 +236,18 @@ public final class MacDaemon: ObservableObject {
                 deviceId: client.identity.deviceId,
                 mode: .agent
             )
-            try child.write(try encodedLine(.intentSubmit(localSubmit)))
+            try await child.write(try encodedLine(.intentSubmit(localSubmit)))
         } catch {
             record.status = .failed
             record.finishedAt = Int(Date().timeIntervalSince1970)
             record.summary = "Brain host could not start"
-            persist(record)
+            guard persist(record) else {
+                await reject(messageId: submit.id, code: "journal_failed", from: peerId)
+                return
+            }
             currentRun = nil
             activeToken = nil
+            discardBrainOutput(token: token)
             activeChild?.terminate()
             activeChild = nil
             activeCancellation?.cancel()
@@ -248,26 +257,52 @@ public final class MacDaemon: ObservableObject {
         }
     }
 
-    private func consumeBrainOutput(_ data: Data, from child: ProcessGroupChild, token: UUID) async {
+    private func enqueueBrainOutput(_ data: Data, from child: ProcessGroupChild, token: UUID) {
         guard token == activeToken, child === activeChild else { return }
-        brainOutput.append(data)
-        while let newline = brainOutput.firstIndex(of: 10) {
-            let line = Data(brainOutput[..<newline])
-            brainOutput.removeSubrange(...newline)
-            if line.isEmpty { continue }
-            guard line.count <= 1_048_576 else {
+        guard data.count <= 8_388_608 - brainOutputQueueBytes else {
+            failBrain(token: token, code: "brain_output_queue_full")
+            return
+        }
+        brainOutputQueue.append(data)
+        brainOutputQueueBytes += data.count
+        guard brainDrainTask == nil else { return }
+        brainDrainToken = token
+        brainDrainTask = Task { @MainActor [weak self] in
+            await self?.drainBrainOutput(from: child, token: token)
+        }
+    }
+
+    private func drainBrainOutput(from child: ProcessGroupChild, token: UUID) async {
+        defer {
+            if brainDrainToken == token {
+                brainDrainTask = nil
+                brainDrainToken = nil
+            }
+        }
+        while token == activeToken, child === activeChild, brainDrainToken == token {
+            guard !brainOutputQueue.isEmpty else { return }
+            let data = brainOutputQueue.removeFirst()
+            brainOutputQueueBytes -= data.count
+            brainOutput.append(data)
+            while let newline = brainOutput.firstIndex(of: 10) {
+                let line = Data(brainOutput[..<newline])
+                brainOutput.removeSubrange(...newline)
+                if line.isEmpty { continue }
+                guard line.count <= 1_048_576 else {
+                    failBrain(token: token, code: "brain_line_too_large")
+                    return
+                }
+                guard let message = try? JSONDecoder().decode(AnyMessage.self, from: line) else {
+                    failBrain(token: token, code: "invalid_brain_message")
+                    return
+                }
+                await handleBrainMessage(message, from: child, token: token)
+                guard token == activeToken, child === activeChild else { return }
+            }
+            if brainOutput.count > 1_048_576 {
                 failBrain(token: token, code: "brain_line_too_large")
                 return
             }
-            guard let message = try? JSONDecoder().decode(AnyMessage.self, from: line) else {
-                failBrain(token: token, code: "invalid_brain_message")
-                return
-            }
-            await handleBrainMessage(message, from: child, token: token)
-            guard token == activeToken else { return }
-        }
-        if brainOutput.count > 1_048_576 {
-            failBrain(token: token, code: "brain_line_too_large")
         }
     }
 
@@ -276,7 +311,7 @@ public final class MacDaemon: ObservableObject {
         switch message {
         case .toolsList(let request):
             let response = ToolsListResult(id: request.id, tools: tools.descriptors, scope: tools.scope)
-            writeToBrain(.toolsListResult(response), child: child)
+            await writeToBrain(.toolsListResult(response), child: child, token: token)
         case .toolsCall(let call):
             await executeToolCall(call, child: child, token: token)
         case .runCreated(let event):
@@ -284,8 +319,9 @@ public final class MacDaemon: ObservableObject {
             updated.brainRunId = event.runId
             updated.status = .running
             updated.summary = "running"
-            persist(updated)
+            guard persist(updated) else { return }
             currentRun = updated
+            refreshHistory()
             await send(.runCreated(event), to: record.ownerPeerId)
         case .stepApprovalRequired(let request):
             do {
@@ -310,12 +346,13 @@ public final class MacDaemon: ObservableObject {
             updated.status = event.ok ? .completed : (event.cancelled == true ? .cancelled : .failed)
             updated.finishedAt = Int(Date().timeIntervalSince1970)
             updated.summary = event.summary
-            persist(updated)
+            guard persist(updated) else { return }
             refreshHistory()
             currentRun = nil
             state = .ready
             grants.clear(runId: event.runId)
             activeToken = nil
+            discardBrainOutput(token: token)
             activeCancellation?.cancel()
             activeCancellation = nil
             activeChild = nil
@@ -344,13 +381,13 @@ public final class MacDaemon: ObservableObject {
                     error: "no matching single-use signed approval grant",
                     ms: 0
                 )
-                writeToBrain(.toolsResult(denied), child: child)
+                await writeToBrain(.toolsResult(denied), child: child, token: token)
                 return
             }
         }
         let result = await tools.execute(call, cancellation: cancellation)
         guard token == activeToken, child === activeChild else { return }
-        writeToBrain(.toolsResult(result), child: child)
+        await writeToBrain(.toolsResult(result), child: child, token: token)
     }
 
     private func authorize(_ decision: ApprovalDecision, from peerId: String) async {
@@ -367,7 +404,7 @@ public final class MacDaemon: ObservableObject {
                 return
             }
             do {
-                try child.write(try encodedLine(.approvalDecision(decision)))
+                try await child.write(try encodedLine(.approvalDecision(decision)))
             } catch {
                 failBrain(token: token, code: "brain_stdin_failed")
             }
@@ -407,7 +444,7 @@ public final class MacDaemon: ObservableObject {
         if currentRun != nil {
             interruptActiveRun(summary: "interrupted, effects may remain", status: .interrupted, notifyPeer: false)
         }
-        state = .idle
+        if state != .failed { state = .idle }
     }
 
     private func interruptActiveRun(summary: String, status: MacRunStatus, notifyPeer: Bool) {
@@ -417,11 +454,13 @@ public final class MacDaemon: ObservableObject {
         }
         let runId = record.brainRunId ?? record.id
         let peerId = record.ownerPeerId
-        activeToken = nil
+        let token = activeToken
         record.status = status
         record.finishedAt = Int(Date().timeIntervalSince1970)
         record.summary = summary
-        persist(record)
+        guard persist(record) else { return }
+        activeToken = nil
+        if let token { discardBrainOutput(token: token) }
         refreshHistory()
         currentRun = nil
         grants.clear(runId: runId)
@@ -447,11 +486,12 @@ public final class MacDaemon: ObservableObject {
     private func failBrain(token: UUID, code: String) {
         guard token == activeToken, var record = currentRun else { return }
         let peerId = record.ownerPeerId
-        activeToken = nil
         record.status = .failed
         record.finishedAt = Int(Date().timeIntervalSince1970)
         record.summary = "Brain host failed"
-        persist(record)
+        guard persist(record) else { return }
+        activeToken = nil
+        discardBrainOutput(token: token)
         refreshHistory()
         currentRun = nil
         grants.clear(runId: record.brainRunId ?? record.id)
@@ -468,23 +508,53 @@ public final class MacDaemon: ObservableObject {
         failBrain(token: token, code: processExitedNormally(status) && processExitCode(status) == 0 ? "brain_exited_early" : "brain_process_failed")
     }
 
-    private func writeToBrain(_ message: AnyMessage, child: ProcessGroupChild) {
+    private func writeToBrain(_ message: AnyMessage, child: ProcessGroupChild, token: UUID) async {
         do {
-            try child.write(try encodedLine(message))
+            try await child.write(try encodedLine(message))
         } catch {
-            if let token = activeToken { failBrain(token: token, code: "brain_stdin_failed") }
+            if token == activeToken { failBrain(token: token, code: "brain_stdin_failed") }
         }
     }
 
-    private func persist(_ record: MacRunRecord) {
+    @discardableResult
+    private func persist(_ record: MacRunRecord) -> Bool {
         do {
             try journal.update(record)
+            return true
         } catch {
-            state = .failed
-            activeToken = nil
-            activeCancellation?.cancel()
-            activeChild?.terminate()
+            persistenceFailed()
+            return false
         }
+    }
+
+    private func persistenceFailed() {
+        state = .failed
+        if let token = activeToken { discardBrainOutput(token: token) }
+        activeToken = nil
+        grants.clearAll()
+        activeCancellation?.cancel()
+        activeCancellation = nil
+        activeChild?.terminate()
+        activeChild = nil
+    }
+
+    private func resetBrainOutput(token: UUID) {
+        brainDrainTask?.cancel()
+        brainDrainTask = nil
+        brainDrainToken = token
+        brainOutput.removeAll(keepingCapacity: true)
+        brainOutputQueue.removeAll(keepingCapacity: true)
+        brainOutputQueueBytes = 0
+    }
+
+    private func discardBrainOutput(token: UUID) {
+        guard brainDrainToken == token else { return }
+        brainDrainTask?.cancel()
+        brainDrainTask = nil
+        brainDrainToken = nil
+        brainOutput.removeAll(keepingCapacity: false)
+        brainOutputQueue.removeAll(keepingCapacity: false)
+        brainOutputQueueBytes = 0
     }
 
     private func refreshHistory() {

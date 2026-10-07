@@ -140,6 +140,7 @@ public final class RemoteClient: ObservableObject {
 
         let urlSession = URLSession(configuration: .ephemeral)
         let task = urlSession.webSocketTask(with: hubURL)
+        task.maximumMessageSize = Self.maximumWebSocketMessageBytes
         self.session = urlSession
         self.socket = task
         task.resume()
@@ -206,7 +207,9 @@ public final class RemoteClient: ObservableObject {
             await link.sendGate.release()
         } catch {
             await link.sendGate.release()
-            if currentGeneration == generation, shouldFailClosed(error) { failClosed(error) }
+            if currentGeneration == generation,
+               links[peerId]?.token == link.token,
+               shouldFailClosed(error) { failClosed(error) }
             throw error
         }
     }
@@ -296,7 +299,15 @@ public final class RemoteClient: ObservableObject {
                         guard data.count <= Self.maximumWebSocketMessageBytes else {
                             throw RemoteClientError.webSocketMessageTooLarge
                         }
-                        try await self.handleRelay(data, generation: expected)
+                        let envelope = try RelayEnvelope.decode(data)
+                        let linkToken = self.links[envelope.from]?.token
+                        do {
+                            try await self.handleRelay(data, envelope: envelope, generation: expected)
+                        } catch {
+                            guard self.generation == expected else { return }
+                            if linkToken != self.links[envelope.from]?.token { continue }
+                            throw error
+                        }
                     @unknown default:
                         throw RemoteClientError.unsupportedWebSocketMessage
                     }
@@ -422,8 +433,7 @@ public final class RemoteClient: ObservableObject {
         try await sendLinkData(hello, to: message.deviceId, link: activeLink, generation: expected)
     }
 
-    private func handleRelay(_ data: Data, generation expected: UInt64) async throws {
-        let envelope = try RelayEnvelope.decode(data)
+    private func handleRelay(_ data: Data, envelope: RelayEnvelope, generation expected: UInt64) async throws {
         guard envelope.to == identity.deviceId, let link = links[envelope.from] else {
             throw RemoteClientError.unknownPeer(envelope.from)
         }
@@ -445,6 +455,7 @@ public final class RemoteClient: ObservableObject {
                 onFrame?(envelope.from, frame)
             }
         } catch {
+            guard expected == generation, links[envelope.from]?.token == link.token else { throw error }
             dropLink(envelope.from)
             peers[envelope.from]?.ready = false
             onSecurityEvent?(.freshLinkFailed(envelope.from))
@@ -488,7 +499,9 @@ public final class RemoteClient: ObservableObject {
             await link.sendGate.release()
         } catch {
             await link.sendGate.release()
-            if expected == generation, shouldFailClosed(error) { failClosed(error) }
+            if expected == generation,
+               links[peerId]?.token == link.token,
+               shouldFailClosed(error) { failClosed(error) }
             throw error
         }
     }

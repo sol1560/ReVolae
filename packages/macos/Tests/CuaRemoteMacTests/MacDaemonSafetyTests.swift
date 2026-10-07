@@ -13,6 +13,84 @@ final class MacDaemonSafetyTests: XCTestCase {
         func removeValue(forKey key: String) throws { values[key] = nil }
     }
 
+    private final class LockedData: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Data()
+
+        func append(_ data: Data) {
+            lock.lock()
+            value.append(data)
+            lock.unlock()
+        }
+
+        var snapshot: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    func testNonblockingChildWriteDrainsMoreThanPipeCapacity() async throws {
+        try await withWorkspace { workspace in
+            let child = try ProcessGroupChild.spawn(executable: "/bin/cat", arguments: [], workingDirectory: workspace, environment: [:])
+            let output = LockedData()
+            let exited = expectation(description: "cat exited after EOF")
+            child.installHandlers(
+                onStdout: { output.append($0) },
+                onExit: { _ in exited.fulfill() }
+            )
+            let payload = Data(repeating: 0x61, count: 1_048_576)
+
+            try await child.write(payload)
+            child.closeInput()
+            await fulfillment(of: [exited], timeout: 10)
+
+            XCTAssertEqual(output.snapshot, payload)
+        }
+    }
+
+    func testBlockedChildWriteIsCancellable() async throws {
+        try await withWorkspace { workspace in
+            let child = try ProcessGroupChild.spawn(executable: "/bin/sleep", arguments: ["30"], workingDirectory: workspace, environment: [:])
+            let exited = expectation(description: "sleep terminated")
+            child.installHandlers(onStdout: { _ in }, onExit: { _ in exited.fulfill() })
+            defer { child.terminate() }
+            let write = Task { try await child.write(Data(repeating: 0x61, count: 1_048_576)) }
+
+            try await Task.sleep(for: .milliseconds(100))
+            write.cancel()
+            do {
+                try await write.value
+                XCTFail("cancelled pipe write unexpectedly completed")
+            } catch is CancellationError {
+            }
+            child.terminate()
+            await fulfillment(of: [exited], timeout: 5)
+        }
+    }
+
+    func testChildWriteQueueRejectsExcessBytes() async throws {
+        try await withWorkspace { workspace in
+            let child = try ProcessGroupChild.spawn(executable: "/bin/sleep", arguments: ["30"], workingDirectory: workspace, environment: [:])
+            defer { child.terminate() }
+            let payload = Data(repeating: 0x61, count: 1_048_576)
+            let writes = [Task { try await child.write(payload) }] + (0..<3).map { _ in
+                Task { try await child.write(payload) }
+            }
+
+            try await Task.sleep(for: .milliseconds(100))
+            do {
+                try await child.write(payload)
+                XCTFail("write queue accepted more than its configured capacity")
+            } catch ProcessGroupError.writeQueueFull {
+            }
+            writes.forEach { $0.cancel() }
+            for write in writes {
+                _ = try? await write.value
+            }
+        }
+    }
+
     func testSignedApprovalExecutesExactShellWriteOnce() async throws {
         try await withWorkspace { workspace in
             let phone = try DeviceIdentityRepository(store: MemoryStore()).loadOrCreate()
@@ -139,6 +217,66 @@ final class MacDaemonSafetyTests: XCTestCase {
             XCTAssertFalse(result.ok)
             XCTAssertEqual(result.error, "path is outside the selected workspace")
         }
+    }
+
+    func testFilesystemToolsCheckCancellationAndRejectRoundedIntMax() async throws {
+        try await withWorkspace { workspace in
+            let file = workspace.appendingPathComponent("input.txt")
+            try Data("contents".utf8).write(to: file)
+            let executor = WorkspaceToolExecutor(workspaceURL: workspace)
+            let cancelled = RunCancellation()
+            cancelled.cancel()
+            let read = ToolsCall(id: "read-cancelled", callId: "read", tool: "fs.read", args: ["path": .string("input.txt")])
+            let list = ToolsCall(id: "list-cancelled", callId: "list", tool: "fs.list", args: ["path": .string(".")])
+
+            let readResult = await executor.execute(read, cancellation: cancelled)
+            let listResult = await executor.execute(list, cancellation: cancelled)
+            XCTAssertEqual(readResult.error, "execution cancelled")
+            XCTAssertEqual(listResult.error, "execution cancelled")
+
+            let overflow = ToolsCall(
+                id: "read-overflow",
+                callId: "overflow",
+                tool: "fs.read",
+                args: ["path": .string("input.txt"), "maxBytes": .number(Double(Int.max))]
+            )
+            let overflowResult = await executor.execute(overflow, cancellation: RunCancellation())
+            XCTAssertEqual(overflowResult.error, "unsupported or malformed tool arguments")
+        }
+    }
+
+    func testJournalInsertAndUpdateLeaveMemoryUnchangedAfterPersistenceFailure() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CuaRemoteMacJournal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journalURL = directory.appendingPathComponent("runs.json")
+        var journal = try RunJournal(fileURL: journalURL)
+        let record = MacRunRecord(
+            id: "journal-run",
+            submitId: "journal-submit",
+            ownerPeerId: "phone",
+            deviceId: "mac",
+            intent: "persist a record",
+            provider: "fixture",
+            createdAt: 100,
+            status: .starting,
+            summary: "starting"
+        )
+
+        try FileManager.default.removeItem(at: directory)
+        try Data("block".utf8).write(to: directory)
+        XCTAssertThrowsError(try journal.insert(record))
+        XCTAssertTrue(journal.allRecords().isEmpty)
+
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try journal.insert(record)
+        try FileManager.default.removeItem(at: directory)
+        try Data("block".utf8).write(to: directory)
+        var completed = record
+        completed.status = .completed
+        XCTAssertThrowsError(try journal.update(completed))
+        XCTAssertEqual(journal.allRecords().first?.status, .starting)
     }
 
     private func makeRequest(

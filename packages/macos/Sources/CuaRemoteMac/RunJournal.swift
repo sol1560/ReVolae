@@ -110,30 +110,38 @@ struct RunJournal {
     }
 
     mutating func insert(_ record: MacRunRecord) throws {
-        records.append(record)
-        try persist()
+        var updated = records
+        updated.append(record)
+        try persist(updated)
+        records = updated
     }
 
     mutating func update(_ record: MacRunRecord) throws {
         guard let index = records.firstIndex(where: { $0.id == record.id }) else {
             throw JournalError.missingRecord
         }
-        records[index] = record
-        try persist()
+        var updated = records
+        updated[index] = record
+        try persist(updated)
+        records = updated
     }
 
     mutating func interruptActiveRuns(now: Int) throws {
+        var updated = records
         var changed = false
-        for index in records.indices where records[index].isActive {
-            records[index].status = .interrupted
-            records[index].finishedAt = now
-            records[index].summary = "interrupted, effects may remain"
+        for index in updated.indices where updated[index].isActive {
+            updated[index].status = .interrupted
+            updated[index].finishedAt = now
+            updated[index].summary = "interrupted, effects may remain"
             changed = true
         }
-        if changed { try persist() }
+        if changed {
+            try persist(updated)
+            records = updated
+        }
     }
 
-    private func persist() throws {
+    private func persist(_ records: [MacRunRecord]) throws {
         let data = try JSONEncoder().encode(Snapshot(version: 1, records: records))
         let directory = fileURL.deletingLastPathComponent()
         let temporaryURL = directory.appendingPathComponent(".runs-\(UUID().uuidString).tmp")
