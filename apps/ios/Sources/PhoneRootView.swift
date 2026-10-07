@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import CuaRemoteCore
 import CuaRemoteProtocol
 
@@ -108,10 +109,13 @@ struct PhoneRootView: View {
                         if session.busy { ProgressView() }
                     }
                     NoticeView(text: session.notice)
-                    TextField("希望 Mac 做什么？例如：列出工作目录中的文件", text: $intent, axis: .vertical)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .lineLimit(3...8).padding().background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
-                        .accessibilityIdentifier("intent-input")
+                    ZStack(alignment: .topLeading) {
+                        if intent.isEmpty {
+                            Text("希望 Mac 做什么？例如：列出工作目录中的文件")
+                                .foregroundStyle(.secondary).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                        IntentTextEditor(text: $intent)
+                    }.frame(height: 110).padding().background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
                     HStack {
                         Button { Task { await session.submit(intent) } } label: { Label("发送任务", systemImage: "arrow.up") }
                             .buttonStyle(.borderedProminent)
@@ -183,6 +187,44 @@ struct PhoneRootView: View {
 
     private var parsedOffer: PairOffer? { try? JSONDecoder().decode(PairOffer.self, from: Data(offerText.utf8)) }
     private var phoneFingerprint: String { (try? keyFingerprint(session.client.identity.publicKeys)) ?? "不可用" }
+}
+
+private struct IntentTextEditor: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.font = .preferredFont(forTextStyle: .body)
+        view.adjustsFontForContentSizeCategory = true
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.autocapitalizationType = .none
+        view.autocorrectionType = .no
+        view.spellCheckingType = .no
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.smartInsertDeleteType = .no
+        view.accessibilityIdentifier = "intent-input"
+        view.accessibilityLabel = "希望 Mac 做什么？"
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.text = $text
+        if view.text != text && view.markedTextRange == nil { view.text = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var text: Binding<String>
+
+        init(text: Binding<String>) { self.text = text }
+
+        func textViewDidChange(_ textView: UITextView) { text.wrappedValue = textView.text }
+    }
 }
 
 private struct ApprovalCard: View {
