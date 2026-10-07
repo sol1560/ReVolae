@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "CuaRemote", "slug": "cuaremote", "version": "0.1.0", "scheme": "cuaremote",
+    "orientation": "portrait", "userInterfaceStyle": "dark",
+    "ios": { "supportsTablet": false, "bundleIdentifier": "dev.cuaremote.app", "infoPlist": { "NSFaceIDUsageDescription": "用面容 ID 确认高风险操作和打开云终端" } },
+    "android": { "package": "dev.cuaremote.app" },
+    "plugins": ["expo-router", "expo-secure-store", "expo-local-authentication", "expo-document-picker", ["expo-build-properties", { "ios": { "deploymentTarget": "16.4" } }]],
+    "experiments": { "typedRoutes": true }
+  }
+}

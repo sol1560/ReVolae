@@ -1,3 +1,4 @@
+import { toolNameCodec, type ToolNameCodec } from "./tool-names.js";
 import type { ChatMessage, ChatRequest, ChatResponse, ModelInfo, Provider, ToolCall } from "./types.js";
 
 /**
@@ -10,17 +11,18 @@ export class AnthropicWireProvider implements Provider {
   ) {}
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
+    const names = toolNameCodec([...req.tools.map((t) => t.name), ...req.messages.flatMap((m) => (m.role === "assistant" ? (m.toolCalls ?? []).map((c) => c.name) : []))]);
     const system = req.messages.filter((m) => m.role === "system").map((m) => (m as { content: string }).content).join("\n\n");
     const body: Record<string, unknown> = {
       model: this.cfg.model,
       max_tokens: req.maxTokens ?? 4096,
-      temperature: req.temperature ?? 0.2,
+      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       ...(system ? { system } : {}),
-      messages: mergeAdjacent(req.messages.filter((m) => m.role !== "system").map(toAnthropic)),
+      messages: mergeAdjacent(req.messages.filter((m) => m.role !== "system").map((m) => toAnthropic(m, names))),
     };
     if (req.tools.length) {
-      body.tools = req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema }));
-      body.tool_choice = req.forceTool ? { type: "tool", name: req.forceTool } : { type: "auto" };
+      body.tools = req.tools.map((t) => ({ name: names.enc(t.name), description: t.description, input_schema: t.inputSchema }));
+      body.tool_choice = req.forceTool ? { type: "tool", name: names.enc(req.forceTool) } : { type: "auto" };
     }
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, "")}/v1/messages`, {
       method: "POST",
@@ -35,7 +37,7 @@ export class AnthropicWireProvider implements Provider {
     if (!res.ok) throw new Error(`${this.info.id} HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
     const json = (await res.json()) as AnthropicResponse;
     const text = json.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
-    const toolCalls: ToolCall[] = json.content.filter((c) => c.type === "tool_use").map((c) => ({ id: c.id!, name: c.name!, args: (c.input as Record<string, unknown>) ?? {} }));
+    const toolCalls: ToolCall[] = json.content.filter((c) => c.type === "tool_use").map((c) => ({ id: c.id!, name: names.dec(c.name!), args: (c.input as Record<string, unknown>) ?? {} }));
     return {
       text,
       toolCalls,
@@ -48,14 +50,14 @@ export class AnthropicWireProvider implements Provider {
 type ABlock = Record<string, unknown>;
 type AMsg = { role: "user" | "assistant"; content: ABlock[] };
 
-function toAnthropic(m: ChatMessage): AMsg {
+function toAnthropic(m: ChatMessage, names: ToolNameCodec): AMsg {
   switch (m.role) {
     case "user":
       return { role: "user", content: m.content.map(part) };
     case "assistant": {
       const blocks: ABlock[] = [];
       if (m.content) blocks.push({ type: "text", text: m.content });
-      for (const tc of m.toolCalls ?? []) blocks.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.args });
+      for (const tc of m.toolCalls ?? []) blocks.push({ type: "tool_use", id: tc.id, name: names.enc(tc.name), input: tc.args });
       return { role: "assistant", content: blocks.length ? blocks : [{ type: "text", text: "(继续)" }] };
     }
     case "tool":

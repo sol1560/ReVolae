@@ -4,6 +4,9 @@ import {
   BrainLocation,
   CapabilityCard,
   Channel,
+  CloudEntry,
+  CloudState,
+  CloudVariant,
   ConcreteAction,
   Cost,
   DevicePlatform,
@@ -15,6 +18,7 @@ import {
   PrecheckSource,
   PrivacySettings,
   PublicKeys,
+  QuickCard,
   Scope,
   Shortcut,
   SyncBlob,
@@ -39,6 +43,10 @@ export const IntentSubmit = msg("intent.submit", {
   provider: z.string().optional(),
   /** terminal 模式：把建议命令填进哪个会话 */
   terminalSessionId: z.string().optional(),
+  /** 给人看的短标题（快捷卡发的是填好的长指令，这里放用户写的那句）；云电脑用它给快照命名 */
+  title: z.string().max(200).optional(),
+  /** 只对云电脑有效：复制成几份各用一种做法跑，跑完让手机挑（1 = 不分叉） */
+  variants: z.number().int().min(1).max(3).optional(),
 });
 export const RunCancel = msg("run.cancel", { runId: z.string() });
 export const ApprovalDecision = msg("approval.decision", {
@@ -92,6 +100,10 @@ export const RunCreated = msg("run.created", {
   intent: z.string(),
   provider: z.string(),
   plan: z.array(PlanStep),
+  /** 云电脑分叉：这是哪个任务的一份（手机按它把几份归到一起） */
+  parentRunId: z.string().optional(),
+  /** 这一份用的思路，例如「最少改动」 */
+  approach: z.string().optional(),
 });
 export const PlanUpdated = msg("plan.updated", { runId: z.string(), plan: z.array(PlanStep) });
 export const StepStarted = msg("step.started", { runId: z.string(), stepId: z.string(), title: z.string(), channel: Channel.optional() });
@@ -193,6 +205,41 @@ export const ModelsCatalog = msg("models.catalog", {
 export const ShortcutsList = msg("shortcuts.list", { shortcuts: z.array(Shortcut) });
 export const ErrorMsg = msg("error", { code: z.string(), message: z.string(), ref: z.string().optional() });
 export const Ack = msg("ack", { ref: z.string() });
+
+// ─────────────────────────── 云电脑（手机 ↔ 云端大脑，走端到端加密链路）───────────────────────────
+
+/** 手机问云电脑的状态（顺带拿快捷命令卡和可撤销的快照） */
+export const CloudStatusGet = msg("cloud.status.get", {});
+/** 手机要求现在就唤醒（打开 App 时预热，省掉第一条命令的等待） */
+export const CloudWake = msg("cloud.wake", {});
+export const CloudStatus = msg("cloud.status", {
+  deviceId: z.string(),
+  state: CloudState,
+  lastActiveAt: z.number().int().optional(),
+  /** 空闲多少秒后自动暂停 */
+  idleSeconds: z.number().int().positive(),
+  cards: z.array(QuickCard),
+  /** 可以整机撤销回去的任务，新的在前 */
+  snapshots: z.array(z.object({ runId: z.string(), createdAt: z.number().int(), title: z.string().optional() })),
+  /** 当前账号能不能用分叉（pro 权益） */
+  variantsAllowed: z.number().int().min(1).max(3),
+});
+export const CloudFilesList = msg("cloud.files.list", { path: z.string().optional() });
+export const CloudFiles = msg("cloud.files", { path: z.string(), entries: z.array(CloudEntry) });
+/** 手机要上传文件：拿一个直传地址（大文件不经过 hub），默认放到 work/inbox/ */
+export const CloudUploadBegin = msg("cloud.upload.begin", { name: z.string().min(1).max(255), size: z.number().int().nonnegative().optional() });
+export const CloudUploadUrl = msg("cloud.upload.url", { ref: z.string(), path: z.string(), url: z.string(), expiresAt: z.number().int() });
+export const CloudDownloadGet = msg("cloud.download.get", { path: z.string() });
+/** 可下载的文件：agent 调 cloud.download 时主动推，或回应 cloud.download.get */
+export const CloudDownload = msg("cloud.download", { runId: z.string().optional(), path: z.string(), name: z.string(), size: z.number().int().nonnegative(), url: z.string(), expiresAt: z.number().int() });
+/** 云电脑里有网页服务起来了 */
+export const CloudPreview = msg("cloud.preview", { runId: z.string().optional(), port: z.number().int(), url: z.string() });
+/** 分叉跑完：几份结果让手机挑 */
+export const CloudVariants = msg("cloud.variants", { runId: z.string(), items: z.array(CloudVariant), expiresAt: z.number().int() });
+/** 挑中一份（forkId 为空 = 都不要，主机器保持原样） */
+export const CloudPick = msg("cloud.pick", { runId: z.string(), forkId: z.string().optional() });
+/** 整机撤销到某个任务开始之前 */
+export const CloudUndo = msg("cloud.undo", { runId: z.string() });
 
 // ─────────────────────────── 端 ↔ hub（明文）───────────────────────────
 
@@ -320,6 +367,7 @@ export const PhoneToDevice = z.discriminatedUnion("type", [
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
   AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
+  CloudStatusGet, CloudWake, CloudFilesList, CloudUploadBegin, CloudDownloadGet, CloudPick, CloudUndo,
 ]);
 export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
 
@@ -327,6 +375,7 @@ export const DeviceToPhone = z.discriminatedUnion("type", [
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, SyncKey, ErrorMsg, Ack,
+  CloudStatus, CloudFiles, CloudUploadUrl, CloudDownload, CloudPreview, CloudVariants,
 ]);
 export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
@@ -359,6 +408,8 @@ export const AllMessages = {
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,
+  CloudStatusGet, CloudWake, CloudFilesList, CloudUploadBegin, CloudDownloadGet, CloudPick, CloudUndo,
+  CloudStatus, CloudFiles, CloudUploadUrl, CloudDownload, CloudPreview, CloudVariants,
   Hello, AuthChallenge, AuthResponse, AuthOk, Presence, PeerKeys, PushRegister, PushSend, UsageReport,
   PairRequest, PairConfirm, PairResult, PairCodeClaim, PairOfferMsg, PairRemoved, DevicesList, DevicesPage, DeviceRename, DeviceUnpair,
   SyncPut, SyncPull, SyncPage, SyncDelete, BillingGet, BillingStatus,

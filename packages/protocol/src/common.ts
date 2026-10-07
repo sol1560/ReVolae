@@ -18,6 +18,7 @@ export const Channel = z.enum([
   "ipad",
   "android",
   "terminal",
+  "cloud",
 ]);
 export type Channel = z.infer<typeof Channel>;
 
@@ -154,6 +155,11 @@ export const ToolDescriptor = z.object({
   costClass: z.union([z.literal(0), z.literal(1), z.literal(2)]),
   /** 调用结果会进入模型上下文并可能离开设备 */
   dataLeavesDevice: z.boolean(),
+  /**
+   * 工具在可整机撤销的沙箱（云电脑）里执行：本机的危险命令表不适用，
+   * 只有「把数据往外发」的动作（推代码、发请求、传文件到别处）才升到 L2。
+   */
+  sandboxed: z.boolean().optional(),
   inputSchema: z.record(z.string(), z.unknown()),
 });
 export type ToolDescriptor = z.infer<typeof ToolDescriptor>;
@@ -310,3 +316,55 @@ export const DeviceStats = z.object({
   uptimeSec: z.number().optional(),
 });
 export type DeviceStats = z.infer<typeof DeviceStats>;
+
+// ─────────────────────────── 云电脑 ───────────────────────────
+
+export const CloudState = z.enum(["none", "running", "paused"]);
+export type CloudState = z.infer<typeof CloudState>;
+
+/** 快捷命令卡：手机首页点一下就能用的常用任务，填好字段后把 intent 模板里的 {key} 换掉作为意图发出 */
+export const QuickCardField = z.object({
+  key: z.string(),
+  label: z.string(),
+  kind: z.enum(["text", "file", "choice"]),
+  choices: z.array(z.string()).optional(),
+  placeholder: z.string().optional(),
+  /** file 类型可接受的 MIME 前缀，如 "application/pdf"、"audio/" */
+  accept: z.array(z.string()).optional(),
+});
+export type QuickCardField = z.infer<typeof QuickCardField>;
+export const QuickCard = z.object({
+  id: z.string(),
+  title: z.string(),
+  /** SF Symbols 名字 */
+  icon: z.string(),
+  subtitle: z.string(),
+  fields: z.array(QuickCardField),
+  intent: z.string(),
+  /** 适合「试几种做法」 */
+  variants: z.boolean().optional(),
+});
+export type QuickCard = z.infer<typeof QuickCard>;
+
+export const CloudEntry = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["file", "dir"]),
+  size: z.number().int().nonnegative(),
+});
+export type CloudEntry = z.infer<typeof CloudEntry>;
+
+/** 分叉挑选里的一份结果 */
+export const CloudVariant = z.object({
+  forkId: z.string(),
+  /** 给这份的思路，例如「最少改动」 */
+  approach: z.string(),
+  ok: z.boolean(),
+  summary: z.string(),
+  /** 预览页或结果截图，base64 JPEG/PNG（缩小过） */
+  screenshot: z.string().optional(),
+  previewUrl: z.string().optional(),
+  cost: Cost.optional(),
+});
+export type CloudVariant = z.infer<typeof CloudVariant>;
+

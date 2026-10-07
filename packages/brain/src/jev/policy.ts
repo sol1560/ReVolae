@@ -45,10 +45,29 @@ const L2_PATTERNS: RegExp[] = [
 /** 涉及支付 / 金融的应用名或路径片段 */
 const FINANCE_HINTS = ["alipay", "支付宝", "wechat pay", "微信支付", "银行", "bank", "paypal", "stripe", "钱包", "wallet", "keychain", "钥匙串", "1password"];
 
+/**
+ * 沙箱工具（云电脑）专用：沙箱里删改、装软件都能整机撤销，不用确认；
+ * 但把数据发出沙箱是撤销不了的，这些一律 L2。
+ */
+const SANDBOX_EGRESS_PATTERNS: RegExp[] = [
+  /\bgit\s+push\b/, /\b(npm|pnpm|yarn|bun)\s+publish\b/, /\btwine\s+upload\b/, /\bcargo\s+publish\b/,
+  // curl 带请求体 / 非 GET 方法 / 上传文件（区分大小写：-F 是表单上传，-f 只是「失败时不输出」）
+  /\bcurl\b.*(\s-X\s*(POST|PUT|PATCH|DELETE)\b|\s--request\s+(POST|PUT|PATCH|DELETE)\b|\s--data(-\w+)?\b|\s-d\s|\s-F\s|\s--form\b|\s-T\s|\s--upload-file\b)/,
+  /\bwget\b.*--post-(data|file)\b/, /\bscp\b/, /\bsftp\b/, /\brsync\b.*\s\S+:\S*/, /\bssh\s/,
+  /\bgh\s+(pr|issue|release|repo|gist)\s+(create|merge|edit|delete|close|comment)\b/, /\b(sendmail|mailx?)\b/,
+];
+
+/** 沙箱命令按 ; && || | 换行拆成段，每段单独匹配，避免跨命令拼出误报（如 `pkill -f x; curl -sI …`） */
+function sandboxEgress(args: Record<string, unknown>, action: ConcreteAction): boolean {
+  const cmd = typeof args.cmd === "string" ? args.cmd : action.detail;
+  return cmd.split(/\|\||&&|[;|\n]/).some((seg) => SANDBOX_EGRESS_PATTERNS.some((re) => re.test(seg)));
+}
+
 /** 静态等级 = 工具声明的等级，命中危险模式再升级 */
 export function staticLevel(tool: ToolDescriptor, args: Record<string, unknown>, action: ConcreteAction): Level {
   let lvl: Level = tool.staticLevel;
   const text = `${action.detail} ${action.summary} ${action.targetApp ?? ""} ${action.targetPath ?? ""} ${JSON.stringify(args)}`.toLowerCase();
+  if (tool.sandboxed) return sandboxEgress(args, action) ? 2 : lvl;
   if (L2_PATTERNS.some((re) => re.test(text))) lvl = 2;
   if (FINANCE_HINTS.some((h) => text.includes(h))) lvl = 2;
   // GUI 里的输入类动作（打字 / 设值）至少 L1；只看不点是 L0

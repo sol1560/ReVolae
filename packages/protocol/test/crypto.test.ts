@@ -272,3 +272,17 @@ describe("Swift 互通向量（fixtures/hpke.json、approval.json）可回放", 
     }
   });
 });
+
+import { fromBase64, toBase64 } from "../src/bytes.js";
+describe("base64（纯 JS）", () => {
+  test("和 Buffer 结果一致，各种长度都能往返；非法字符报错", () => {
+    for (let n = 0; n < 70; n++) {
+      const u = crypto.getRandomValues(new Uint8Array(n));
+      const s = toBase64(u);
+      expect(s).toBe(Buffer.from(u).toString("base64"));
+      expect(fromBase64(s)).toEqual(u);
+    }
+    expect(fromBase64("-_8")).toEqual(new Uint8Array(Buffer.from("+/8", "base64")));
+    expect(() => fromBase64("ab$c")).toThrow("非法字符");
+  });
+});

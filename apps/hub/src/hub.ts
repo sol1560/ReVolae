@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * hub 核心：和传输层（Bun.serve 的 ws 对象）解耦，方便单测。
  *
@@ -53,6 +54,11 @@ export interface HubOptions {
   push?: PushSender;
   /** 手机 JWT 的 HS256 secret；不给 = 单机模式 */
   jwtSecret?: string;
+  /**
+   * 自助账号：手机不带 JWT 也能登录，账号 id 由手机签名公钥派生（u_ + sha256 前 16 位十六进制）。
+   * 同一台手机（钥匙串里的同一把密钥）永远是同一个账号。只在多账号模式（有 jwtSecret）下有意义。
+   */
+  selfAccounts?: boolean;
   /** 二维码 / 6 位码里写给手机的 hub 地址 */
   publicURL?: string;
   now?: () => number;
@@ -63,6 +69,8 @@ export interface HubOptions {
   syncQuotaPerKind?: number;
   /** 计费（免费额度 / credit）；不给 = 不限量、billing.get 回 billing_disabled */
   billing?: Billing;
+  /** 设备列表里额外加的虚拟设备（云电脑）；账号未登录时不调 */
+  extraDevices?: (accountId: string) => DeviceSummary[];
   /** 某个端登录成功 / 掉线（云端大脑管理器靠这个按账号起大脑、清理掉线设备） */
   onPresence?: (ev: { deviceId: string; role: Role; accountId: string; platform: string; online: boolean }) => void;
 }
@@ -306,6 +314,8 @@ export class Hub {
         return s.conn.close(4001, "account_mismatch");
       }
       accountId = r.claims.sub;
+    } else if (m.role === "phone" && this.o.selfAccounts) {
+      accountId = selfAccountId(m.pubKeys.sig);
     } else if (m.role === "phone") {
       this.fail(s, "token_required", "手机端必须带账号 token", m.id);
       return s.conn.close(4001, "token_required");
@@ -374,6 +384,16 @@ export class Hub {
     } catch (e) {
       this.fail(s, "billing_unavailable", e instanceof Error ? e.message : String(e), m.id);
     }
+  }
+
+  /** 账号的额度变了（RevenueCat webhook）：把最新的 billing.status 推给这个账号在线的手机 */
+  async pushBillingStatus(accountId: string): Promise<number> {
+    if (!this.o.billing) return 0;
+    const phones = [...this.online.values()].filter((x) => x.accountId === accountId && x.role === "phone");
+    if (!phones.length) return 0;
+    const st = await this.o.billing.status(accountId);
+    for (const p of phones) this.reply(p, st);
+    return phones.length;
   }
 
   private async onPairRequest(s: Session, m: Extract<HubMessage, { type: "pair.request" }>) {
@@ -574,7 +594,8 @@ export class Hub {
         ...(pairedAt !== undefined ? { pairedAt } : {}),
       });
     }
-    return out.sort((a, b) => Number(b.paired) - Number(a.paired) || Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+    const extra = accountId !== UNCLAIMED ? (this.o.extraDevices?.(accountId) ?? []) : [];
+    return [...extra, ...out.sort((a, b) => Number(b.paired) - Number(a.paired) || Number(b.online) - Number(a.online) || a.name.localeCompare(b.name))];
   }
 
   /** 解绑：删两个方向的配对，通知双方（离线的一方下次登录时 announce 里自然没有对端了） */
@@ -606,4 +627,9 @@ function pairKey(deviceId: string, phoneId: string) {
 
 function keysOf(d: DeviceRow): PublicKeys {
   return { kem: d.kem, sig: d.sig, sigAlg: d.sigAlg };
+}
+
+/** 自助账号 id：由手机签名公钥派生，挑战应答通过才算数（登录时公钥要签名） */
+export function selfAccountId(sigPubB64: string): string {
+  return `u_${createHash("sha256").update(sigPubB64).digest("hex").slice(0, 16)}`;
 }

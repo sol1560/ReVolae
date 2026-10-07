@@ -1,0 +1,3 @@
+[install]
+# Expo / React Native 需要平铺的 node_modules（隔离布局会让同版本原生模块装出多份）
+linker = "hoisted"

@@ -1,3 +1,4 @@
+import { toolNameCodec, type ToolNameCodec } from "./tool-names.js";
 import type { ChatMessage, ChatRequest, ChatResponse, ModelInfo, Provider, ToolCall } from "./types.js";
 
 /**
@@ -10,15 +11,16 @@ export class OpenAIWireProvider implements Provider {
   ) {}
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
+    const names = toolNameCodec([...req.tools.map((t) => t.name), ...req.messages.flatMap((m) => (m.role === "assistant" ? (m.toolCalls ?? []).map((c) => c.name) : []))]);
     const body: Record<string, unknown> = {
       model: this.cfg.model,
-      messages: req.messages.map(toOpenAI),
+      messages: req.messages.map((m) => toOpenAI(m, names)),
       max_tokens: req.maxTokens ?? 4096,
-      temperature: req.temperature ?? 0.2,
+      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
     };
     if (req.tools.length) {
-      body.tools = req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
-      body.tool_choice = req.forceTool ? { type: "function", function: { name: req.forceTool } } : "auto";
+      body.tools = req.tools.map((t) => ({ type: "function", function: { name: names.enc(t.name), description: t.description, parameters: t.inputSchema } }));
+      body.tool_choice = req.forceTool ? { type: "function", function: { name: names.enc(req.forceTool) } } : "auto";
     }
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
@@ -30,7 +32,7 @@ export class OpenAIWireProvider implements Provider {
     const json = (await res.json()) as OpenAIResponse;
     const choice = json.choices?.[0];
     const msg = choice?.message ?? { content: "" };
-    const toolCalls: ToolCall[] = (msg.tool_calls ?? []).map((tc) => ({ id: tc.id, name: tc.function.name, args: safeJson(tc.function.arguments) }));
+    const toolCalls: ToolCall[] = (msg.tool_calls ?? []).map((tc) => ({ id: tc.id, name: names.dec(tc.function.name), args: safeJson(tc.function.arguments) }));
     return {
       text: typeof msg.content === "string" ? msg.content : "",
       toolCalls,
@@ -40,7 +42,7 @@ export class OpenAIWireProvider implements Provider {
   }
 }
 
-function toOpenAI(m: ChatMessage): Record<string, unknown> {
+function toOpenAI(m: ChatMessage, names: ToolNameCodec): Record<string, unknown> {
   switch (m.role) {
     case "system":
       return { role: "system", content: m.content };
@@ -50,7 +52,7 @@ function toOpenAI(m: ChatMessage): Record<string, unknown> {
       return {
         role: "assistant",
         content: m.content || null,
-        ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((tc) => ({ id: tc.id, type: "function", function: { name: tc.name, arguments: JSON.stringify(tc.args) } })) } : {}),
+        ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((tc) => ({ id: tc.id, type: "function", function: { name: names.enc(tc.name), arguments: JSON.stringify(tc.args) } })) } : {}),
       };
     case "tool": {
       // OpenAI 的 tool 消息只能是文本；图片另起一条 user 消息（由 loop 负责），这里只拼文本

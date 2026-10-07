@@ -303,6 +303,90 @@ public enum Channel: String, Codable, Sendable, CaseIterable {
     case ipad = "ipad"
     case android = "android"
     case terminal = "terminal"
+    case cloud = "cloud"
+}
+
+public enum CloudEntryType: String, Codable, Sendable, CaseIterable {
+    case file = "file"
+    case dir = "dir"
+}
+
+public struct CloudEntry: Codable, Sendable {
+    public var name: String
+    public var path: String
+    public var `type`: CloudEntryType
+    public var size: Int
+
+    public init(name: String, path: String, `type`: CloudEntryType, size: Int) {
+        self.name = name
+        self.path = path
+        self.`type` = `type`
+        self.size = size
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case path
+        case `type`
+        case size
+    }
+}
+
+public enum CloudState: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case running = "running"
+    case paused = "paused"
+}
+
+public struct Cost: Codable, Sendable {
+    public var inputTokens: Int
+    public var outputTokens: Int
+    public var jevTokens: Int?
+    public var usd: Double
+
+    public init(inputTokens: Int, outputTokens: Int, jevTokens: Int? = nil, usd: Double) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.jevTokens = jevTokens
+        self.usd = usd
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens
+        case outputTokens
+        case jevTokens
+        case usd
+    }
+}
+
+public struct CloudVariant: Codable, Sendable {
+    public var forkId: String
+    public var approach: String
+    public var ok: Bool
+    public var summary: String
+    public var screenshot: String?
+    public var previewUrl: String?
+    public var cost: Cost?
+
+    public init(forkId: String, approach: String, ok: Bool, summary: String, screenshot: String? = nil, previewUrl: String? = nil, cost: Cost? = nil) {
+        self.forkId = forkId
+        self.approach = approach
+        self.ok = ok
+        self.summary = summary
+        self.screenshot = screenshot
+        self.previewUrl = previewUrl
+        self.cost = cost
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case forkId
+        case approach
+        case ok
+        case summary
+        case screenshot
+        case previewUrl
+        case cost
+    }
 }
 
 public struct ConcreteAction: Codable, Sendable {
@@ -326,27 +410,6 @@ public struct ConcreteAction: Codable, Sendable {
         case detail
         case targetApp
         case targetPath
-    }
-}
-
-public struct Cost: Codable, Sendable {
-    public var inputTokens: Int
-    public var outputTokens: Int
-    public var jevTokens: Int?
-    public var usd: Double
-
-    public init(inputTokens: Int, outputTokens: Int, jevTokens: Int? = nil, usd: Double) {
-        self.inputTokens = inputTokens
-        self.outputTokens = outputTokens
-        self.jevTokens = jevTokens
-        self.usd = usd
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case inputTokens
-        case outputTokens
-        case jevTokens
-        case usd
     }
 }
 
@@ -606,6 +669,69 @@ public struct PublicKeys: Codable, Sendable {
     }
 }
 
+public enum QuickCardFieldKind: String, Codable, Sendable, CaseIterable {
+    case text = "text"
+    case file = "file"
+    case choice = "choice"
+}
+
+public struct QuickCardField: Codable, Sendable {
+    public var key: String
+    public var label: String
+    public var kind: QuickCardFieldKind
+    public var choices: [String]?
+    public var placeholder: String?
+    public var accept: [String]?
+
+    public init(key: String, label: String, kind: QuickCardFieldKind, choices: [String]? = nil, placeholder: String? = nil, accept: [String]? = nil) {
+        self.key = key
+        self.label = label
+        self.kind = kind
+        self.choices = choices
+        self.placeholder = placeholder
+        self.accept = accept
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case label
+        case kind
+        case choices
+        case placeholder
+        case accept
+    }
+}
+
+public struct QuickCard: Codable, Sendable {
+    public var id: String
+    public var title: String
+    public var icon: String
+    public var subtitle: String
+    public var fields: [QuickCardField]
+    public var intent: String
+    public var variants: Bool?
+
+    public init(id: String, title: String, icon: String, subtitle: String, fields: [QuickCardField], intent: String, variants: Bool? = nil) {
+        self.id = id
+        self.title = title
+        self.icon = icon
+        self.subtitle = subtitle
+        self.fields = fields
+        self.intent = intent
+        self.variants = variants
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case icon
+        case subtitle
+        case fields
+        case intent
+        case variants
+    }
+}
+
 public struct Scope: Codable, Sendable {
     public var allowedDirs: [String]
     public var allowedApps: [String]
@@ -759,15 +885,17 @@ public struct ToolDescriptor: Codable, Sendable {
     public var staticLevel: Level
     public var costClass: ToolDescriptorCostClass
     public var dataLeavesDevice: Bool
+    public var sandboxed: Bool?
     public var inputSchema: [String: JSONValue]
 
-    public init(name: String, description: String, channel: Channel, staticLevel: Level, costClass: ToolDescriptorCostClass, dataLeavesDevice: Bool, inputSchema: [String: JSONValue]) {
+    public init(name: String, description: String, channel: Channel, staticLevel: Level, costClass: ToolDescriptorCostClass, dataLeavesDevice: Bool, sandboxed: Bool? = nil, inputSchema: [String: JSONValue]) {
         self.name = name
         self.description = description
         self.channel = channel
         self.staticLevel = staticLevel
         self.costClass = costClass
         self.dataLeavesDevice = dataLeavesDevice
+        self.sandboxed = sandboxed
         self.inputSchema = inputSchema
     }
 
@@ -778,6 +906,7 @@ public struct ToolDescriptor: Codable, Sendable {
         case staticLevel
         case costClass
         case dataLeavesDevice
+        case sandboxed
         case inputSchema
     }
 }
@@ -830,14 +959,18 @@ public struct IntentSubmit: Codable, Sendable {
     public var mode: IntentSubmitMode
     public var provider: String?
     public var terminalSessionId: String?
+    public var title: String?
+    public var variants: Int?
 
-    public init(id: String, text: String, deviceId: String, mode: IntentSubmitMode, provider: String? = nil, terminalSessionId: String? = nil) {
+    public init(id: String, text: String, deviceId: String, mode: IntentSubmitMode, provider: String? = nil, terminalSessionId: String? = nil, title: String? = nil, variants: Int? = nil) {
         self.id = id
         self.text = text
         self.deviceId = deviceId
         self.mode = mode
         self.provider = provider
         self.terminalSessionId = terminalSessionId
+        self.title = title
+        self.variants = variants
     }
 
     enum CodingKeys: String, CodingKey {
@@ -849,6 +982,8 @@ public struct IntentSubmit: Codable, Sendable {
         case mode
         case provider
         case terminalSessionId
+        case title
+        case variants
     }
 }
 
@@ -1337,14 +1472,18 @@ public struct RunCreated: Codable, Sendable {
     public var intent: String
     public var provider: String
     public var plan: [PlanStep]
+    public var parentRunId: String?
+    public var approach: String?
 
-    public init(id: String, runId: String, deviceId: String, intent: String, provider: String, plan: [PlanStep]) {
+    public init(id: String, runId: String, deviceId: String, intent: String, provider: String, plan: [PlanStep], parentRunId: String? = nil, approach: String? = nil) {
         self.id = id
         self.runId = runId
         self.deviceId = deviceId
         self.intent = intent
         self.provider = provider
         self.plan = plan
+        self.parentRunId = parentRunId
+        self.approach = approach
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1356,6 +1495,8 @@ public struct RunCreated: Codable, Sendable {
         case intent
         case provider
         case plan
+        case parentRunId
+        case approach
     }
 }
 
@@ -1993,6 +2134,341 @@ public struct Ack: Codable, Sendable {
         case id
         case `type`
         case ref
+    }
+}
+
+public struct CloudStatusGet: Codable, Sendable {
+    public static let messageType = "cloud.status.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.status.get"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public struct CloudWake: Codable, Sendable {
+    public static let messageType = "cloud.wake"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.wake"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public struct CloudFilesList: Codable, Sendable {
+    public static let messageType = "cloud.files.list"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.files.list"
+    public var path: String?
+
+    public init(id: String, path: String? = nil) {
+        self.id = id
+        self.path = path
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case path
+    }
+}
+
+public struct CloudUploadBegin: Codable, Sendable {
+    public static let messageType = "cloud.upload.begin"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.upload.begin"
+    public var name: String
+    public var size: Int?
+
+    public init(id: String, name: String, size: Int? = nil) {
+        self.id = id
+        self.name = name
+        self.size = size
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case name
+        case size
+    }
+}
+
+public struct CloudDownloadGet: Codable, Sendable {
+    public static let messageType = "cloud.download.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.download.get"
+    public var path: String
+
+    public init(id: String, path: String) {
+        self.id = id
+        self.path = path
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case path
+    }
+}
+
+public struct CloudPick: Codable, Sendable {
+    public static let messageType = "cloud.pick"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.pick"
+    public var runId: String
+    public var forkId: String?
+
+    public init(id: String, runId: String, forkId: String? = nil) {
+        self.id = id
+        self.runId = runId
+        self.forkId = forkId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+        case forkId
+    }
+}
+
+public struct CloudUndo: Codable, Sendable {
+    public static let messageType = "cloud.undo"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.undo"
+    public var runId: String
+
+    public init(id: String, runId: String) {
+        self.id = id
+        self.runId = runId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+    }
+}
+
+public struct CloudStatusSnapshotsItem: Codable, Sendable {
+    public var runId: String
+    public var createdAt: Int
+    public var title: String?
+
+    public init(runId: String, createdAt: Int, title: String? = nil) {
+        self.runId = runId
+        self.createdAt = createdAt
+        self.title = title
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case runId
+        case createdAt
+        case title
+    }
+}
+
+public struct CloudStatus: Codable, Sendable {
+    public static let messageType = "cloud.status"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.status"
+    public var deviceId: String
+    public var state: CloudState
+    public var lastActiveAt: Int?
+    public var idleSeconds: Int
+    public var cards: [QuickCard]
+    public var snapshots: [CloudStatusSnapshotsItem]
+    public var variantsAllowed: Int
+
+    public init(id: String, deviceId: String, state: CloudState, lastActiveAt: Int? = nil, idleSeconds: Int, cards: [QuickCard], snapshots: [CloudStatusSnapshotsItem], variantsAllowed: Int) {
+        self.id = id
+        self.deviceId = deviceId
+        self.state = state
+        self.lastActiveAt = lastActiveAt
+        self.idleSeconds = idleSeconds
+        self.cards = cards
+        self.snapshots = snapshots
+        self.variantsAllowed = variantsAllowed
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case deviceId
+        case state
+        case lastActiveAt
+        case idleSeconds
+        case cards
+        case snapshots
+        case variantsAllowed
+    }
+}
+
+public struct CloudFiles: Codable, Sendable {
+    public static let messageType = "cloud.files"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.files"
+    public var path: String
+    public var entries: [CloudEntry]
+
+    public init(id: String, path: String, entries: [CloudEntry]) {
+        self.id = id
+        self.path = path
+        self.entries = entries
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case path
+        case entries
+    }
+}
+
+public struct CloudUploadUrl: Codable, Sendable {
+    public static let messageType = "cloud.upload.url"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.upload.url"
+    public var ref: String
+    public var path: String
+    public var url: String
+    public var expiresAt: Int
+
+    public init(id: String, ref: String, path: String, url: String, expiresAt: Int) {
+        self.id = id
+        self.ref = ref
+        self.path = path
+        self.url = url
+        self.expiresAt = expiresAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case ref
+        case path
+        case url
+        case expiresAt
+    }
+}
+
+public struct CloudDownload: Codable, Sendable {
+    public static let messageType = "cloud.download"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.download"
+    public var runId: String?
+    public var path: String
+    public var name: String
+    public var size: Int
+    public var url: String
+    public var expiresAt: Int
+
+    public init(id: String, runId: String? = nil, path: String, name: String, size: Int, url: String, expiresAt: Int) {
+        self.id = id
+        self.runId = runId
+        self.path = path
+        self.name = name
+        self.size = size
+        self.url = url
+        self.expiresAt = expiresAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+        case path
+        case name
+        case size
+        case url
+        case expiresAt
+    }
+}
+
+public struct CloudPreview: Codable, Sendable {
+    public static let messageType = "cloud.preview"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.preview"
+    public var runId: String?
+    public var port: Int
+    public var url: String
+
+    public init(id: String, runId: String? = nil, port: Int, url: String) {
+        self.id = id
+        self.runId = runId
+        self.port = port
+        self.url = url
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+        case port
+        case url
+    }
+}
+
+public struct CloudVariants: Codable, Sendable {
+    public static let messageType = "cloud.variants"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "cloud.variants"
+    public var runId: String
+    public var items: [CloudVariant]
+    public var expiresAt: Int
+
+    public init(id: String, runId: String, items: [CloudVariant], expiresAt: Int) {
+        self.id = id
+        self.runId = runId
+        self.items = items
+        self.expiresAt = expiresAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+        case items
+        case expiresAt
     }
 }
 
@@ -2963,6 +3439,19 @@ public enum AnyMessage: Codable, Sendable {
     case shortcutsList(ShortcutsList)
     case errorMsg(ErrorMsg)
     case ack(Ack)
+    case cloudStatusGet(CloudStatusGet)
+    case cloudWake(CloudWake)
+    case cloudFilesList(CloudFilesList)
+    case cloudUploadBegin(CloudUploadBegin)
+    case cloudDownloadGet(CloudDownloadGet)
+    case cloudPick(CloudPick)
+    case cloudUndo(CloudUndo)
+    case cloudStatus(CloudStatus)
+    case cloudFiles(CloudFiles)
+    case cloudUploadUrl(CloudUploadUrl)
+    case cloudDownload(CloudDownload)
+    case cloudPreview(CloudPreview)
+    case cloudVariants(CloudVariants)
     case hello(Hello)
     case authChallenge(AuthChallenge)
     case authResponse(AuthResponse)
@@ -3044,6 +3533,19 @@ public enum AnyMessage: Codable, Sendable {
         case .shortcutsList: return "shortcuts.list"
         case .errorMsg: return "error"
         case .ack: return "ack"
+        case .cloudStatusGet: return "cloud.status.get"
+        case .cloudWake: return "cloud.wake"
+        case .cloudFilesList: return "cloud.files.list"
+        case .cloudUploadBegin: return "cloud.upload.begin"
+        case .cloudDownloadGet: return "cloud.download.get"
+        case .cloudPick: return "cloud.pick"
+        case .cloudUndo: return "cloud.undo"
+        case .cloudStatus: return "cloud.status"
+        case .cloudFiles: return "cloud.files"
+        case .cloudUploadUrl: return "cloud.upload.url"
+        case .cloudDownload: return "cloud.download"
+        case .cloudPreview: return "cloud.preview"
+        case .cloudVariants: return "cloud.variants"
         case .hello: return "hello"
         case .authChallenge: return "auth.challenge"
         case .authResponse: return "auth.response"
@@ -3127,6 +3629,19 @@ public enum AnyMessage: Codable, Sendable {
         case "shortcuts.list": self = .shortcutsList(try c.decode(ShortcutsList.self))
         case "error": self = .errorMsg(try c.decode(ErrorMsg.self))
         case "ack": self = .ack(try c.decode(Ack.self))
+        case "cloud.status.get": self = .cloudStatusGet(try c.decode(CloudStatusGet.self))
+        case "cloud.wake": self = .cloudWake(try c.decode(CloudWake.self))
+        case "cloud.files.list": self = .cloudFilesList(try c.decode(CloudFilesList.self))
+        case "cloud.upload.begin": self = .cloudUploadBegin(try c.decode(CloudUploadBegin.self))
+        case "cloud.download.get": self = .cloudDownloadGet(try c.decode(CloudDownloadGet.self))
+        case "cloud.pick": self = .cloudPick(try c.decode(CloudPick.self))
+        case "cloud.undo": self = .cloudUndo(try c.decode(CloudUndo.self))
+        case "cloud.status": self = .cloudStatus(try c.decode(CloudStatus.self))
+        case "cloud.files": self = .cloudFiles(try c.decode(CloudFiles.self))
+        case "cloud.upload.url": self = .cloudUploadUrl(try c.decode(CloudUploadUrl.self))
+        case "cloud.download": self = .cloudDownload(try c.decode(CloudDownload.self))
+        case "cloud.preview": self = .cloudPreview(try c.decode(CloudPreview.self))
+        case "cloud.variants": self = .cloudVariants(try c.decode(CloudVariants.self))
         case "hello": self = .hello(try c.decode(Hello.self))
         case "auth.challenge": self = .authChallenge(try c.decode(AuthChallenge.self))
         case "auth.response": self = .authResponse(try c.decode(AuthResponse.self))
@@ -3211,6 +3726,19 @@ public enum AnyMessage: Codable, Sendable {
         case .shortcutsList(let v): try c.encode(v)
         case .errorMsg(let v): try c.encode(v)
         case .ack(let v): try c.encode(v)
+        case .cloudStatusGet(let v): try c.encode(v)
+        case .cloudWake(let v): try c.encode(v)
+        case .cloudFilesList(let v): try c.encode(v)
+        case .cloudUploadBegin(let v): try c.encode(v)
+        case .cloudDownloadGet(let v): try c.encode(v)
+        case .cloudPick(let v): try c.encode(v)
+        case .cloudUndo(let v): try c.encode(v)
+        case .cloudStatus(let v): try c.encode(v)
+        case .cloudFiles(let v): try c.encode(v)
+        case .cloudUploadUrl(let v): try c.encode(v)
+        case .cloudDownload(let v): try c.encode(v)
+        case .cloudPreview(let v): try c.encode(v)
+        case .cloudVariants(let v): try c.encode(v)
         case .hello(let v): try c.encode(v)
         case .authChallenge(let v): try c.encode(v)
         case .authResponse(let v): try c.encode(v)

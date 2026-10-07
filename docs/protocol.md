@@ -264,3 +264,27 @@ kind 2 的 payload（`packages/protocol/src/media.ts` / `Frame.swift` 的 `Media
 手机 ↔ hub：`billing.get{}` → `billing.status{plan: free|paid, freeRunsTotal, freeRunsUsed, periodEndsAt, credits, creditsPerUsd, freeDeviceLimit, topUpURL?}`；HTTP `GET /api/billing` 同一份。没开计费的 hub 回 `error{code:"billing_disabled"}`。
 
 credit 账本：`HUB_BILLING=joc` 用 JustOne Connector（`JOC_BASE_URL` / `JOC_API_KEY` / `JOC_TOPUP_URL`，路径默认 `/api/credits/balance` 与 `/api/credits/charge`，可用 `JOC_BALANCE_PATH` / `JOC_CHARGE_PATH` 改）。接口按「查余额 + 幂等扣款」的最小假设：`GET …/balance?account=` 回 `{credits}`；`POST …/charge {account, credits, ref, memo}` 回 `{credits}`，同 `ref` 再扣回 409 视为已扣。`HUB_BILLING=local` 用 hub 自己的 `credits` 表（开发 / 自建，`store.addCredits` 充值）。不设 = 关。
+
+## 云电脑
+
+每个账号一台 E2B 沙箱，设备 id 是 `cloud:<account>`，由 hub 放在 `devices.page` 第一项（`platform: "cloud"`，永远 `online`）。云电脑的大脑和执行都在 hub 进程里，所以这一档 **hub 能看到明文**；手机和云端大脑之间仍走端到端链路（防中间人、防其它账号），但对 hub 本身不保密。
+
+手机 → 云端大脑（`brain:<account>`，加密）：
+
+| 消息 | 回复 | 说明 |
+|---|---|---|
+| `cloud.status.get` / `cloud.wake` | `cloud.status` | 状态（none / running / paused，按最后活跃时间算）、快捷命令卡、可撤销的快照、`variantsAllowed` |
+| `cloud.files.list{path?}` | `cloud.files` | 默认 `/home/user/work` |
+| `cloud.upload.begin{name,size?}` | `cloud.upload.url{ref,path,url,expiresAt}` | 手机把文件 `POST multipart/form-data`（字段 `file`）直传给沙箱，不经过 hub；落在 `work/inbox/`，重名加序号 |
+| `cloud.download.get{path}` | `cloud.download` | 1 小时有效的签名下载地址 |
+| `cloud.undo{runId}` | `cloud.status` | 用任务前的快照新建一台替换当前机器 |
+| `cloud.pick{runId,forkId?}` | `cloud.status` | 挑中一份分叉；不带 `forkId` = 都不要 |
+| `intent.submit{deviceId:"cloud:…", variants?:1..3}` | 普通 run 事件 | `variants>1` 时按 `variantsAllowed` 截断 |
+
+云端大脑 → 手机：`cloud.preview{runId,port,url}`（有网页服务起来了）、`cloud.download{runId,…}`（agent 交付文件）、`cloud.variants{runId,items,expiresAt}`（分叉结果，含截图）。分叉的每一份是独立 run：`runId = <原任务>.<n>`，`run.created` 带 `parentRunId` 和 `approach`。
+
+终端：手机对大脑发 `terminal.open`（签名绑 `cloud:<account>`），PTY 在沙箱里，其余规则同「远程终端」。
+
+策略：云电脑工具描述带 `sandboxed: true`，本机危险命令表不适用；只有「把数据发出沙箱」的命令（`git push`、带数据的 `curl`、`scp`、`gh pr create` 等）静态升到 L2。
+
+计费：run 结束时成本 = 模型费用 + 沙箱运行秒数 × 单价（默认 2 vCPU / 4 GiB = $0.000046/s，分叉每份单独计）。接 RevenueCat 时 credit 是虚拟货币 `CRD`，hub 用 Developer API v2 扣款（整数，向上取整，`reference` = runId）；`pro` 权益给 3 份分叉，否则 1 份。

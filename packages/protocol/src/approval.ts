@@ -15,6 +15,7 @@ import type { ApprovalSignature, PublicKeys } from "./common.js";
 
 export type SigAlg = PublicKeys["sigAlg"];
 import { approvalSignedPayload, terminalOpenChallenge } from "./frame.js";
+import { fromBase64, toBase64 } from "./bytes.js";
 
 const utf8 = new TextEncoder();
 
@@ -144,7 +145,7 @@ export function verifySignedPayload(p: { payload: Uint8Array; alg: SigAlg; sig: 
 /** 软件密钥签名（测试 / 无 Secure Enclave 平台）。返回 base64 raw 签名。 */
 export function signPayload(payload: Uint8Array, privateKey: Uint8Array, alg: SigAlg): string {
   const raw = alg === "ES256" ? p256.sign(sha256(payload), privateKey, { prehash: false, lowS: true }) : ed25519.sign(payload, privateKey);
-  return Buffer.from(raw).toString("base64");
+  return toBase64(raw);
 }
 
 /** 测试 / 非 Secure Enclave 平台用：软件密钥签名 */
@@ -183,5 +184,5 @@ function normalizeP256Signature(sig: Uint8Array): Uint8Array | null {
 }
 
 function fromB64(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, "base64"));
+  return fromBase64(s);
 }

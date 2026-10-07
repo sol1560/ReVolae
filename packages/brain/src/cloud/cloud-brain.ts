@@ -22,6 +22,9 @@ import type { Host } from "../host/types.js";
 import { JevClient } from "../jev/client.js";
 import { PolicyEngine } from "../jev/policy.js";
 import { catalogMessage, resolveProvider } from "../llm/catalog.js";
+import type { Provider } from "../llm/types.js";
+import { TerminalManager } from "../terminal/manager.js";
+import { CLOUD_REQUEST_TYPES, type CloudHooks, type CloudRequest, type CloudRunContext } from "./cloud-hooks.js";
 import { PeerLinks } from "./peer-links.js";
 
 export interface CloudBrainOptions {
@@ -41,6 +44,8 @@ export interface CloudBrainOptions {
     reserve: (runId: string) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
     settle: (runId: string, cost: Cost) => Promise<unknown>;
   };
+  /** 这个账号的云电脑（不给 = 没开云电脑） */
+  cloud?: CloudHooks;
   log?: (rec: Record<string, unknown>) => void;
   now?: () => number;
 }
@@ -51,7 +56,8 @@ interface RunState {
   deviceId: string;
 }
 
-const PHONE_TYPES = new Set(["intent.submit", "approval.decision", "run.cancel", "app.learn.start", "app.learn.stop", "app.card.run", "models.list"]);
+const PHONE_TYPES = new Set<string>(["intent.submit", "approval.decision", "run.cancel", "app.learn.start", "app.learn.stop", "app.card.run", "models.list", ...CLOUD_REQUEST_TYPES]);
+const TERMINAL_TYPES = new Set(["terminal.open", "terminal.resize", "terminal.close", "terminal.ack"]);
 
 /**
  * 云端大脑：跑在 hub 进程里的一个虚拟端点。
@@ -75,6 +81,8 @@ export class CloudBrain {
   private readonly privacy = new Map<string, PrivacySettings>();
   private readonly phoneListeners = new Set<(from: string, m: AnyMessage) => void>();
   private readonly inbound = new Map<string, Promise<void>>();
+  /** 云电脑终端：每台手机一个管理器（签名用各自的公钥验） */
+  private readonly terminals = new Map<string, TerminalManager>();
   private readonly jev: JevClient;
   private readonly now: () => number;
 
@@ -105,10 +113,19 @@ export class CloudBrain {
     const r = await this.links.receive(bytes);
     if (!r) return; // 握手帧
     const f = decodeFrame(r.frame);
+    if (f.kind === 1) {
+      // 终端字节：只有云电脑的终端在大脑这一侧
+      this.terminals.get(r.from)?.input(f);
+      return;
+    }
     if (f.kind !== 0) return;
     const parsed = AnyMessage.safeParse(parseControl(f));
     if (!parsed.success) return;
     const m = parsed.data;
+    if (this.o.cloud && TERMINAL_TYPES.has(m.type)) {
+      this.terminalFor(r.from)?.handle(m as Parameters<TerminalManager["handle"]>[0]);
+      return;
+    }
     if (PHONE_TYPES.has(m.type)) {
       void this.onPhoneMessage(r.from, m);
       return;
@@ -125,6 +142,10 @@ export class CloudBrain {
     this.hosts.get(peerId)?.failAll(`${peerId} 掉线了`);
     // iPad 重连后指针位置不可信，校准模型也重新从设备取
     this.ipadHosts.delete(peerId);
+    // 先关终端再删链路：关终端会给对端发消息，要是先删链路，这一发会建出一条「已握手」的新链路，
+    // 对端重连后拿不到我方握手（见 client 测试「断线重连」）
+    this.terminals.get(peerId)?.closeAll();
+    this.terminals.delete(peerId);
     this.links.drop(peerId);
     this.inbound.delete(peerId);
     for (const [runId, st] of this.runs) {
@@ -171,6 +192,30 @@ export class CloudBrain {
       this.adbHosts.set(deviceId, h);
     }
     return h;
+  }
+
+  /** 云电脑终端管理器；手机公钥查不到就不开（签名没法验） */
+  private terminalFor(phoneId: string): TerminalManager | undefined {
+    const cloud = this.o.cloud;
+    if (!cloud) return undefined;
+    let t = this.terminals.get(phoneId);
+    if (!t) {
+      const keys = this.o.peerKeys(phoneId);
+      if (!keys) return undefined;
+      t = new TerminalManager({
+        deviceId: cloud.deviceId,
+        phoneKeys: keys,
+        spawn: cloud.spawnPty,
+        sendFrame: (bytes) => void this.links.send(phoneId, bytes).catch(() => {}),
+        sendMsg: (body) => void this.sendTo(phoneId, body).catch(() => {}),
+        // 目录在沙箱里，本机查不到；不存在时 PTY 那边会报错
+        cwdExists: () => true,
+        now: this.now,
+        log: this.o.log,
+      });
+      this.terminals.set(phoneId, t);
+    }
+    return t;
   }
 
   private verifierFor(phoneId: string) {
@@ -224,6 +269,23 @@ export class CloudBrain {
       case "app.card.run":
         await this.startCard(phoneId, m);
         break;
+      case "cloud.status.get":
+      case "cloud.wake":
+      case "cloud.files.list":
+      case "cloud.upload.begin":
+      case "cloud.download.get":
+      case "cloud.pick":
+      case "cloud.undo": {
+        const reply = (body: MsgBody) => this.sendTo(phoneId, body);
+        if (!this.o.cloud) {
+          await reply({ type: "error", code: "cloud_disabled", message: "这个 hub 没开云电脑", ref: m.id }).catch(() => {});
+          break;
+        }
+        await this.o.cloud.handle(m as CloudRequest, { phoneId, reply }).catch((e) =>
+          reply({ type: "error", code: "cloud", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {}),
+        );
+        break;
+      }
       case "models.list":
         // 云端大脑机器上没有用户的本地模型，本地条目一律标不可用
         await this.sendTo(phoneId, catalogMessage({ localUp: { ollama: false, lmstudio: false }, defaultModel: this.o.defaultProvider, brainLocation: "cloud" })).catch(() => {});
@@ -309,7 +371,8 @@ export class CloudBrain {
 
   private async startRun(phoneId: string, m: Extract<AnyMessage, { type: "intent.submit" }>) {
     const deviceId = m.deviceId;
-    let provider;
+    const cloud = this.o.cloud && deviceId === this.o.cloud.deviceId ? this.o.cloud : undefined;
+    let provider: Provider;
     try {
       provider = resolveProvider({ settings: this.privacy.get(deviceId), requested: m.provider, defaultModel: this.o.defaultProvider });
     } catch (e) {
@@ -318,7 +381,6 @@ export class CloudBrain {
     }
     const settings = this.privacy.get(deviceId);
     const policy = new PolicyEngine({ jev: this.jev, jevEnabled: settings?.jevEnabled ?? this.jev.enabled, autonomy: settings?.autonomy ?? "balanced" });
-    const host = this.agentHostFor(deviceId);
     const ctrl = new AbortController();
     const runId = randomUUID();
     if (this.o.billing) {
@@ -332,23 +394,53 @@ export class CloudBrain {
 
     const { emit, approvals } = this.phoneGate(phoneId);
     let cost: Cost = { inputTokens: 0, outputTokens: 0, jevTokens: 0, usd: 0 };
-    const emitTracked: typeof emit = (e) => {
-      if ("cost" in e && e.cost) cost = e.cost;
-      emit(e);
-    };
+    const t0 = Date.now();
+    const ctx: CloudRunContext = { runId, phoneId, intent: m.text, title: m.title ?? m.text, emit: (body) => void this.sendTo(phoneId, body).catch(() => {}) };
+    const run = (host: Host, input: { runId: string; parentRunId?: string; approach?: string }, onEvent: (e: BrainEvent) => void = emit) =>
+      runIntent(
+        { host, provider, policy, approvals, jev: this.jev, emit: onEvent, log: this.o.log, signal: ctrl.signal, platform: cloud ? "云电脑（Debian Linux 沙箱）" : (this.o.devicePlatform?.(deviceId) ?? "unknown") },
+        { runId: input.runId, deviceId, intent: m.text, mode: m.mode, terminalSessionId: m.terminalSessionId, parentRunId: input.parentRunId, approach: input.approach },
+      );
 
     try {
-      const out = await runIntent(
-        { host, provider, policy, approvals, jev: this.jev, emit: emitTracked, log: this.o.log, signal: ctrl.signal, platform: this.o.devicePlatform?.(deviceId) ?? "unknown" },
-        { runId, deviceId, intent: m.text, mode: m.mode, terminalSessionId: m.terminalSessionId },
-      );
-      cost = out.cost;
+      if (cloud) await cloud.beforeRun?.(ctx).catch((e) => this.o.log?.({ t: "cloud_before_run_failed", runId, err: String(e) }));
+      const allowed = cloud?.runVariants && m.mode === "agent" && (m.variants ?? 1) > 1 ? ((await cloud.variantsAllowed?.().catch(() => 1)) ?? 1) : 1;
+      const variants = Math.min(m.variants ?? 1, allowed);
+      if ((m.variants ?? 1) > variants) this.o.log?.({ t: "variants_clamped", runId, asked: m.variants, allowed: variants });
+      if (cloud?.runVariants && variants > 1) {
+        // 分叉：每份各自一个 runId（parentRunId 指回来），成本加总后按原任务结算
+        emit({ type: "run.created", runId, deviceId, intent: m.text, provider: provider.info.id, plan: [] });
+        const out = await cloud.runVariants(ctx, variants, async (host, approach, variantRunId) => {
+          const o = await run(host, { runId: variantRunId, parentRunId: runId, approach });
+          cost = addCost(cost, o.cost);
+          return { ok: o.ok, summary: o.summary, costUsd: o.cost.usd };
+        });
+        cost = { ...cost, usd: cost.usd + out.costUsd };
+        emit({ type: "run.finished", runId, ok: true, summary: `${variants} 种做法都跑完了，挑一个吧`, cost, stepCount: 0, cancelled: ctrl.signal.aborted });
+      } else {
+        const host = cloud ? cloud.host(ctx) : this.agentHostFor(deviceId);
+        const onEvent: typeof emit = (e) => {
+          if ("cost" in e && e.cost) cost = e.cost;
+          emit(e);
+        };
+        const out = await run(host, { runId }, onEvent);
+        cost = out.cost;
+      }
     } catch (e) {
-      await this.sendTo(phoneId, { type: "error", code: "run", message: e instanceof Error ? e.message : String(e), ref: m.id }).catch(() => {});
+      const message = e instanceof Error ? e.message : String(e);
+      this.o.log?.({ t: "run_failed", runId, deviceId, err: message, stack: e instanceof Error ? e.stack?.split("\n").slice(0, 4).join(" | ") : undefined });
+      await this.sendTo(phoneId, { type: "error", code: "run", message, ref: m.id }).catch(() => {});
+      // 手机那边已经看到 run.created 了，补一个失败的 run.finished，别让它一直转圈
+      await this.sendTo(phoneId, { type: "run.finished", runId, ok: false, summary: `出错了：${message}`, cost, stepCount: 0, cancelled: false }).catch(() => {});
     } finally {
       this.runs.delete(runId);
+      if (cloud?.afterRun) cost = { ...cost, usd: cost.usd + cloud.afterRun(ctx, Date.now() - t0) };
       // 断线 / 抛错的 run 也按已发生的成本结算；扣款失败只记日志，不影响手机
       if (this.o.billing) await this.o.billing.settle(runId, cost).catch((e) => this.o.log?.({ t: "billing_settle_failed", runId, err: String(e) }));
     }
   }
+}
+
+function addCost(a: Cost, b: Cost): Cost {
+  return { inputTokens: a.inputTokens + b.inputTokens, outputTokens: a.outputTokens + b.outputTokens, jevTokens: a.jevTokens + b.jevTokens, usd: a.usd + b.usd };
 }

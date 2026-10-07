@@ -22,7 +22,18 @@ export function systemPrompt(p: { platform: string; tools: ToolDescriptor[]; sco
   ];
   if (p.hasJevAx) lines.push("", "gui.act 是快捷方式：给目标和应用名，系统用快速模型从无障碍元素里选目标并执行一步，比你自己看截图便宜 50 倍。GUI 任务优先用它，它说「需要视觉」时你再用 gui.get_window_state + 截图。");
   const hasIpad = p.tools.some((t) => t.name === "ipad.tap");
-  if (hasIpad) lines.push("", "这是一台 iPad，通过 USB dongle 模拟键鼠操作，没有命令行：先 ipad.screenshot 看屏幕，再用截图坐标 ipad.tap；文字用 ipad.type；回主屏幕 ipad.key h+cmd；切换应用 ipad.key tab+cmd。每次点击后想确认结果再截图，不要盲点。ipad.tap 报「还没校准」就先 ipad.calibrate。");
+  const isCloud = p.tools.some((t) => t.name === "cloud.preview");
+  if (isCloud)
+    lines.push(
+      "",
+      "这是用户的「云电脑」：一台只属于这个用户的 Linux 沙箱（Debian 12），用户此刻只拿着手机。",
+      "- 沙箱里可以放手做：装软件、删文件、改配置都不需要确认，做坏了用户可以整机撤销。",
+      "- 用户看不到沙箱的屏幕。产出的文件放在 /home/user/work/out/ 下，最后一定调用 cloud.download 把文件交给用户。",
+      "- 做网页或服务：shell.run 设 background=true 启动（监听 0.0.0.0），再调用 cloud.preview 拿预览链接；想确认页面效果用 browser.screenshot。",
+      "- 用户上传的文件在 /home/user/work/inbox/。",
+      "- 把数据发出沙箱（git push、发请求、发邮件）会让用户确认，只在用户明确要求时做。",
+    );
+  else if (hasIpad) lines.push("", "这是一台 iPad，通过 USB dongle 模拟键鼠操作，没有命令行：先 ipad.screenshot 看屏幕，再用截图坐标 ipad.tap；文字用 ipad.type；回主屏幕 ipad.key h+cmd；切换应用 ipad.key tab+cmd。每次点击后想确认结果再截图，不要盲点。ipad.tap 报「还没校准」就先 ipad.calibrate。");
   else if (!p.hasGui) lines.push("", "这台设备当前没有图形界面自动化能力（cua-driver 未运行），只能用脚本类工具。");
   if (p.mode === "terminal") lines.push("", "当前是「终端模式」：你不能执行任何东西，只能用 propose_command 建议一条命令，并解释它做什么。");
   lines.push("", "开始时先调用 propose_plan 给出 1–6 步的计划（每步一句话 + 通道），然后逐步执行。计划可以在执行中改。");

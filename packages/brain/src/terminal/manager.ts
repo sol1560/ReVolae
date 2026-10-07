@@ -36,6 +36,8 @@ export interface TerminalManagerOptions {
   maxSessions?: number;
   /** 传给每个会话的窗口 / 分块参数 */
   session?: Pick<TerminalSessionOptions, "windowBytes" | "chunkBytes" | "maxQueuedBytes" | "osc">;
+  /** 检查工作目录是否存在；默认查本机磁盘。PTY 在别处（云电脑）时由那边自己处理，传 () => true */
+  cwdExists?: (cwd: string) => boolean;
   /** 子进程默认工作目录（terminal.open 没带 cwd 时） */
   defaultCwd?: string;
   shell?: string;
@@ -134,7 +136,7 @@ export class TerminalManager {
     if (this.sessions.has(m.sessionId)) return fail("terminal_exists", `会话 ${m.sessionId} 已经开着`);
     if (this.sessions.size >= (this.o.maxSessions ?? 8)) return fail("terminal_limit", "同时打开的终端太多了");
     const cwd = m.cwd ?? this.o.defaultCwd;
-    if (cwd !== undefined && !isDirectory(cwd)) return fail("terminal_bad_cwd", `目录不存在：${cwd}`);
+    if (cwd !== undefined && !(this.o.cwdExists ?? isDirectory)(cwd)) return fail("terminal_bad_cwd", `目录不存在：${cwd}`);
     if (this.o.phoneKeys) {
       const now = this.o.now?.() ?? Math.floor(Date.now() / 1000);
       this.pruneNonces(now);

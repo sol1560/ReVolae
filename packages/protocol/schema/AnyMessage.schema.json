@@ -34,6 +34,15 @@
         },
         "terminalSessionId": {
           "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "variants": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
         }
       },
       "required": [
@@ -901,7 +910,8 @@
                   "app",
                   "ipad",
                   "android",
-                  "terminal"
+                  "terminal",
+                  "cloud"
                 ]
               },
               "staticLevel": {
@@ -940,6 +950,12 @@
             ],
             "additionalProperties": false
           }
+        },
+        "parentRunId": {
+          "type": "string"
+        },
+        "approach": {
+          "type": "string"
         }
       },
       "required": [
@@ -994,7 +1010,8 @@
                   "app",
                   "ipad",
                   "android",
-                  "terminal"
+                  "terminal",
+                  "cloud"
                 ]
               },
               "staticLevel": {
@@ -1079,7 +1096,8 @@
             "app",
             "ipad",
             "android",
-            "terminal"
+            "terminal",
+            "cloud"
           ]
         }
       },
@@ -1244,7 +1262,8 @@
                 "app",
                 "ipad",
                 "android",
-                "terminal"
+                "terminal",
+                "cloud"
               ]
             },
             "summary": {
@@ -1332,7 +1351,8 @@
             "app",
             "ipad",
             "android",
-            "terminal"
+            "terminal",
+            "cloud"
           ]
         },
         "cost": {
@@ -1842,7 +1862,8 @@
                   "app",
                   "ipad",
                   "android",
-                  "terminal"
+                  "terminal",
+                  "cloud"
                 ]
               },
               "staticLevel": {
@@ -1878,6 +1899,9 @@
                 ]
               },
               "dataLeavesDevice": {
+                "type": "boolean"
+              },
+              "sandboxed": {
                 "type": "boolean"
               },
               "inputSchema": {
@@ -2653,6 +2677,627 @@
         "id",
         "type",
         "ref"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.status.get"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.wake"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.files.list"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.upload.begin"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.download.get"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.pick"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "forkId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "runId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.undo"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "runId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.status"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "none",
+            "running",
+            "paused"
+          ]
+        },
+        "lastActiveAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "idleSeconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "subtitle": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "file",
+                        "choice"
+                      ]
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "placeholder": {
+                      "type": "string"
+                    },
+                    "accept": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label",
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "intent": {
+                "type": "string"
+              },
+              "variants": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "icon",
+              "subtitle",
+              "fields",
+              "intent"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "runId": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "runId",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "variantsAllowed": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "deviceId",
+        "state",
+        "idleSeconds",
+        "cards",
+        "snapshots",
+        "variantsAllowed"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.files"
+        },
+        "path": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "file",
+                  "dir"
+                ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "name",
+              "path",
+              "type",
+              "size"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "path",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.upload.url"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "ref",
+        "path",
+        "url",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.download"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "url": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "path",
+        "name",
+        "size",
+        "url",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.preview"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "port",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "cloud.variants"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "forkId": {
+                "type": "string"
+              },
+              "approach": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "screenshot": {
+                "type": "string"
+              },
+              "previewUrl": {
+                "type": "string"
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "outputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "jevTokens": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "usd": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens",
+                  "jevTokens",
+                  "usd"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "forkId",
+              "approach",
+              "ok",
+              "summary"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "runId",
+        "items",
+        "expiresAt"
       ],
       "additionalProperties": false
     },
@@ -3917,7 +4562,8 @@
                   "app",
                   "ipad",
                   "android",
-                  "terminal"
+                  "terminal",
+                  "cloud"
                 ]
               },
               "staticLevel": {
@@ -3953,6 +4599,9 @@
                 ]
               },
               "dataLeavesDevice": {
+                "type": "boolean"
+              },
+              "sandboxed": {
                 "type": "boolean"
               },
               "inputSchema": {
@@ -4211,7 +4860,8 @@
                 "app",
                 "ipad",
                 "android",
-                "terminal"
+                "terminal",
+                "cloud"
               ]
             },
             "summary": {

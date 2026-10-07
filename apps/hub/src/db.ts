@@ -5,6 +5,7 @@
  * 例外是用户主动开的云同步：sync_blobs 存的是 AES-GCM 密文块，密钥只在用户的端上。
  */
 import { Database } from "bun:sqlite";
+import type { CloudComputerRow, CloudSnapshotRow, CloudStore } from "@cuaremote/cloud-computer";
 import type { Cost, PairOffer, PublicKeys, SyncBlob, SyncKind } from "@cuaremote/protocol";
 
 export type Role = "device" | "phone" | "brain";
@@ -143,6 +144,21 @@ CREATE TABLE IF NOT EXISTS credits (
   credits REAL NOT NULL,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cloud_computers (
+  account_id TEXT PRIMARY KEY,
+  sandbox_id TEXT NOT NULL,
+  template TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_active_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cloud_snapshots (
+  account_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL,
+  title TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, run_id)
+);
 CREATE TABLE IF NOT EXISTS brain_keys (
   account_id TEXT PRIMARY KEY,
   kem_seed TEXT NOT NULL,
@@ -176,7 +192,8 @@ export interface BrainKeyRow {
   createdAt: number;
 }
 
-export class HubStore {
+/** HubStore 同时是云电脑的持久层（cloud_computers / cloud_snapshots 两张表） */
+export class HubStore implements CloudStore {
   readonly db: Database;
 
   constructor(path = ":memory:") {
@@ -366,6 +383,39 @@ export class HubStore {
     };
   }
 
+  // ── 云电脑 ──
+  getComputer(accountId: string): CloudComputerRow | undefined {
+    const r = this.db.query<Record<string, unknown>, [string]>("SELECT * FROM cloud_computers WHERE account_id = ?").get(accountId);
+    return r ? { accountId: r.account_id as string, sandboxId: r.sandbox_id as string, template: r.template as string, createdAt: r.created_at as number, lastActiveAt: r.last_active_at as number } : undefined;
+  }
+
+  putComputer(c: CloudComputerRow) {
+    this.db
+      .query("INSERT INTO cloud_computers (account_id, sandbox_id, template, created_at, last_active_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET sandbox_id = excluded.sandbox_id, template = excluded.template, last_active_at = excluded.last_active_at")
+      .run(c.accountId, c.sandboxId, c.template, c.createdAt, c.lastActiveAt);
+  }
+
+  deleteComputer(accountId: string) {
+    this.db.query("DELETE FROM cloud_computers WHERE account_id = ?").run(accountId);
+  }
+
+  addSnapshot(s: CloudSnapshotRow) {
+    this.db.query("INSERT OR REPLACE INTO cloud_snapshots (account_id, run_id, snapshot_id, title, created_at) VALUES (?, ?, ?, ?, ?)").run(s.accountId, s.runId, s.snapshotId, s.title ?? null, s.createdAt);
+  }
+
+  getSnapshot(accountId: string, runId: string): CloudSnapshotRow | undefined {
+    const r = this.db.query<Record<string, unknown>, [string, string]>("SELECT * FROM cloud_snapshots WHERE account_id = ? AND run_id = ?").get(accountId, runId);
+    return r ? rowToSnapshot(r) : undefined;
+  }
+
+  listSnapshots(accountId: string): CloudSnapshotRow[] {
+    return this.db.query<Record<string, unknown>, [string]>("SELECT * FROM cloud_snapshots WHERE account_id = ? ORDER BY created_at DESC, rowid DESC").all(accountId).map(rowToSnapshot);
+  }
+
+  deleteSnapshot(accountId: string, runId: string) {
+    this.db.query("DELETE FROM cloud_snapshots WHERE account_id = ? AND run_id = ?").run(accountId, runId);
+  }
+
   // ── 云端大脑密钥 ──
   getBrainKeys(accountId: string): BrainKeyRow | null {
     const r = this.db.query<Record<string, unknown>, [string]>("SELECT * FROM brain_keys WHERE account_id = ?").get(accountId);
@@ -478,4 +528,8 @@ function rowToDevice(r: Record<string, unknown>): DeviceRow {
     createdAt: r.created_at as number,
     lastSeen: r.last_seen as number,
   };
+}
+
+function rowToSnapshot(r: Record<string, unknown>): CloudSnapshotRow {
+  return { accountId: r.account_id as string, runId: r.run_id as string, snapshotId: r.snapshot_id as string, createdAt: r.created_at as number, ...(r.title ? { title: r.title as string } : {}) };
 }

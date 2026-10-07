@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { CloudBrain, JevClient } from "@cuaremote/brain";
 import { deriveKemKeyPair, generateSigningKeyPair, type PublicKeys } from "@cuaremote/protocol";
 import type { Billing } from "./billing.js";
+import type { CloudComputerService } from "./cloud-computer.js";
 import type { Hub } from "./hub.js";
 
 export interface CloudBrainOptions {
@@ -10,6 +11,8 @@ export interface CloudBrainOptions {
   jev?: JevClient;
   /** 云端 run 的计费；不给 = 不限量 */
   billing?: Billing;
+  /** 云电脑（E2B）；不给 = 没有云电脑 */
+  cloud?: CloudComputerService;
   log?: (rec: Record<string, unknown>) => void;
 }
 
@@ -89,6 +92,7 @@ export class CloudBrainManager {
             settle: (runId, cost) => this.o.billing!.settle(accountId, runId, cost),
           }
         : undefined,
+      cloud: this.o.cloud?.hooks(accountId),
       log: this.o.log,
     });
     attached = this.hub.attachEndpoint({

@@ -66,5 +66,6 @@ function firstUserText(req: ChatRequest): string {
 
 function parseShell(intent: string): string[] {
   if (!intent.startsWith("shell:")) return [];
-  return intent.slice(6).split(/\s*&&\s*then:\s*/).map((s) => s.trim()).filter(Boolean);
+  // 只看第一段：分叉时意图后面会追加一段「你负责的思路」
+  return intent.split("\n\n")[0]!.slice(6).split(/\s*&&\s*then:\s*/).map((s) => s.trim()).filter(Boolean);
 }

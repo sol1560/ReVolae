@@ -44,6 +44,9 @@ export interface RunInput {
   intent: string;
   mode: "agent" | "terminal";
   terminalSessionId?: string;
+  /** 云电脑分叉的一份：原任务 id 和这份的思路（思路会追加到给模型的意图里） */
+  parentRunId?: string;
+  approach?: string;
 }
 
 export interface RunOutcome {
@@ -139,7 +142,8 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     const ctx = await recentBlocksContext(deps.host, input.terminalSessionId);
     if (ctx) messages.push({ role: "user", content: [{ type: "text", text: ctx }] });
   }
-  messages.push({ role: "user", content: [{ type: "text", text: `意图：${input.intent}` }] });
+  const approachLine = input.approach ? `\n\n这是同一个任务并行试的几种做法之一，你负责的思路是：「${input.approach}」。按这个思路做，做完用一两句话说清你这版的特点。` : "";
+  messages.push({ role: "user", content: [{ type: "text", text: `意图：${input.intent}${approachLine}` }] });
 
   const addUsage = (u: { inputTokens: number; outputTokens: number }) => {
     cost.inputTokens += u.inputTokens;
@@ -158,7 +162,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     const r = await deps.provider.chat({ messages, tools: modelTools, forceTool: "propose_plan", signal: deps.signal });
     addUsage(r.usage);
     const call = r.toolCalls.find((c) => c.name === "propose_plan");
-    const steps = ((call?.args.steps as { title: string; channel?: string }[] | undefined) ?? [{ title: input.intent, channel: "shell" }]).slice(0, 8);
+    const steps = planSteps(call?.args.steps, input.intent);
     steps.forEach((s, i) => plan.push({ id: `s${i + 1}`, title: String(s.title), channel: asChannel(s.channel), status: "pending" }));
     if (call) {
       messages.push({ role: "assistant", content: r.text, toolCalls: [call] });
@@ -168,7 +172,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     deps.emit({ type: "error", code: "plan_failed", message: String(e instanceof Error ? e.message : e), ref: runId });
     return finish(false, `做计划失败：${e instanceof Error ? e.message : e}`);
   }
-  deps.emit({ type: "run.created", runId, deviceId: input.deviceId, intent: input.intent, provider: deps.provider.info.id, plan: [...plan] });
+  deps.emit({ type: "run.created", runId, deviceId: input.deviceId, intent: input.intent, provider: deps.provider.info.id, plan: [...plan], ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}), ...(input.approach ? { approach: input.approach } : {}) });
   deps.log?.({ t: "run.created", runId, intent: input.intent, provider: deps.provider.info.id, plan });
 
   // 2. 逐步执行
@@ -371,3 +375,25 @@ function safeParse<T>(s: string): T | null {
     return null;
   }
 }
+
+/**
+ * 模型给的计划步骤：正常是数组；有的模型会把数组写成 JSON 字符串，或每步只给一句话。
+ * 解析不出来就退成一步（标题 = 意图），不让计划格式问题挡住整个任务。
+ */
+export function planSteps(raw: unknown, intent: string): { title: string; channel?: string }[] {
+  let v = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      v = raw.split(/\n+/).map((t: string) => t.replace(/^\s*(\d+[.、)]|[-*])\s*/, "").trim()).filter(Boolean);
+    }
+  }
+  const arr = Array.isArray(v) ? v : [];
+  const steps = arr
+    .map((s) => (typeof s === "string" ? { title: s } : s && typeof s === "object" && "title" in s ? { title: String((s as { title: unknown }).title), channel: (s as { channel?: string }).channel } : undefined))
+    .filter((s): s is { title: string; channel?: string } => !!s && !!s.title.trim())
+    .slice(0, 8);
+  return steps.length ? steps : [{ title: intent, channel: "shell" }];
+}
+

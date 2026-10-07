@@ -15,6 +15,12 @@ import {
 } from "../src/index.js";
 
 const samples: Record<string, unknown> = {
+  "cloud.status": { deviceId: "cloud:acct", state: "paused", idleSeconds: 600, cards: [{ id: "c", title: "t", icon: "globe", subtitle: "s", fields: [{ key: "k", label: "l", kind: "text" }], intent: "做 {k}" }], snapshots: [{ runId: "r1", createdAt: 1 }], variantsAllowed: 3 },
+  "cloud.variants": { runId: "r1", expiresAt: 2, items: [{ forkId: "f1", approach: "最少改动", ok: true, summary: "改了 2 个文件", previewUrl: "https://8080-x.e2b.app/" }] },
+  "cloud.upload.url": { ref: "m1", path: "/home/user/work/inbox/a.pdf", url: "https://x", expiresAt: 1 },
+  "cloud.download": { path: "/home/user/work/a.docx", name: "a.docx", size: 10, url: "https://x", expiresAt: 1 },
+  "cloud.preview": { port: 8080, url: "https://8080-x.e2b.app/" },
+  "cloud.files": { path: "/home/user/work", entries: [{ name: "a", path: "/home/user/work/a", type: "dir", size: 0 }] },
   "intent.submit": { text: "列出桌面上的 pdf", deviceId: "mac-1", mode: "agent" },
   "approval.decision": { runId: "r1", stepId: "s1", allow: true },
   "step.precheck": { runId: "r1", stepId: "s1", staticLevel: 1, level: 2, verdict: "confirm", source: "jev", risk: 0.7, jevMs: 120 },
@@ -53,6 +59,14 @@ describe("messages", () => {
     expect(h.type === "history.list" && h.limit).toBe(50);
   });
 
+  test("cloud.* 走端到端链路：peer 联合收，hub 联合不收；intent.variants 限 1–3", () => {
+    expect(PeerMessage.safeParse({ v: 1, id: "a", type: "cloud.pick", runId: "r1", forkId: "f2" }).success).toBe(true);
+    expect(PeerMessage.safeParse({ v: 1, id: "a", type: "cloud.status.get" }).success).toBe(true);
+    expect(HubMessage.safeParse({ v: 1, id: "a", type: "cloud.status.get" }).success).toBe(false);
+    const intent = { v: 1, id: "a", type: "intent.submit", text: "做网页", deviceId: "cloud:acct", mode: "agent" };
+    expect(AnyMessage.safeParse({ ...intent, variants: 3 }).success).toBe(true);
+    expect(AnyMessage.safeParse({ ...intent, variants: 4 }).success).toBe(false);
+  });
   test("hub union does not accept peer-only messages", () => {
     expect(HubMessage.safeParse({ v: 1, id: "x", type: "intent.submit", ...samples["intent.submit"] as object }).success).toBe(false);
   });

@@ -12,3 +12,11 @@
 ## 2026-09-19 13:07 runner sol-mac 离线
 - `list_runners` 返回空。Swift daemon（F1.4）与 iOS app（F1.5…）线程无法创建。orb 侧继续 F0.3–F0.7 / M1 hub / M2 固件 / M4 android；每完成一个 feature 重查一次 runner。
 - 交付包已备好：`.amp/cuaremote-kit.tgz`（Swift 协议包 + mock 大脑 + docs/protocol.md），runner 恢复后 `upload_thread_file` 到 `/Users/sol/cuaremote-kit.tgz`。
+
+## 2026-09-23 云电脑 / Shipaton（需要 Sol）
+| 项 | 要做什么 | 代码侧状态 |
+|---|---|---|
+| 推送到 GitHub | 本地领先 origin/main 10+ 个提交，仓库是公开的；推送需要 Sol 同意 | 已提交在本地 |
+| Railway 部署 | orb 里的 Railway_Token 被 CLI 拒绝；MCP 只能从 GitHub/镜像部署 → 推送后用 MCP 从仓库部署，或给新 token | `apps/hub/Dockerfile` 已验证依赖安装与启动 |
+| RevenueCat 后台 | 建项目 → Test Store 商品（额度包 ×2、pro 月订阅）→ 虚拟货币 CRD 并绑定商品发放数量 → 权益 `pro` 绑订阅 → Offering + Paywall → Webhook（URL `https://<hub>/webhooks/revenuecat`，Authorization 自定）→ 给出 secret key（v2，Customer 读写 + 虚拟货币读写权限）、project id、Test Store 公钥 | `RevenueCatLedger` / webhook / App 付费墙已写并测过（模拟） |
+| iOS 真机安装 | EAS：`EXPO_TOKEN` + Apple 开发者账号（`eas device:create` 注册 iPhone）；或在 Mac 上 `npx expo run:ios --device` | `eas.json` 已配 |

@@ -7,11 +7,12 @@
  * AAD 绑定 kind / id / deviceId / ts：hub 或中间人改这些明文字段，解密直接失败。
  */
 import { SyncBlob, type SyncKind } from "./common.js";
+import { fromBase64, toBase64 } from "./bytes.js";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-const b64 = (u: Uint8Array) => Buffer.from(u).toString("base64");
-const unb64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
+const b64 = toBase64;
+const unb64 = fromBase64;
 const ab = (u: Uint8Array): ArrayBuffer => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
 
 /** 单块明文上限（加密前的 JSON 字节数） */

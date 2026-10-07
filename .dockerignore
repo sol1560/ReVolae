@@ -1,0 +1,11 @@
+**/node_modules
+.git
+.amp
+.agents
+state
+apps/android*
+apps/ios
+firmware/dongle/*/build
+**/*.db
+**/.env
+**/.env.*

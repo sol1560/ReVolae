@@ -73,6 +73,9 @@ function need(v: string | undefined, name: string): string {
 const PRICES: Record<string, { priceIn: number; priceOut: number }> = {
   "anthropic:claude-fable-5.1": { priceIn: 3, priceOut: 15 },
   "openai:gpt-6-astra": { priceIn: 2.5, priceOut: 10 },
+  // 2026-06 Anthropic 官方价
+  "anthropic:claude-sonnet-5": { priceIn: 2, priceOut: 10 },
+  "zenmux:anthropic/claude-sonnet-5": { priceIn: 2, priceOut: 10 },
 };
 export function lookupPrice(id: string): { priceIn: number; priceOut: number } {
   return PRICES[id] ?? { priceIn: 0, priceOut: 0 };

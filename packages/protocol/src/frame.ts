@@ -1,3 +1,4 @@
+import { sha256 as nobleSha256 } from "@noble/hashes/sha2.js";
 /**
  * 端到端帧（解密后的明文，或加密前的明文）：
  *   [u8 kind][u32 streamId BE][payload]
@@ -125,9 +126,6 @@ export function approvalSignedPayload(challenge: string, allow: boolean): string
 }
 
 function sha256Hex(s: string): string {
-  // Bun / Node 都有 crypto.subtle，但这里要同步：用 Bun.CryptoHasher 或 node:crypto
-  // 为了在浏览器也能用，退化为同步纯 JS 不现实；这里假定运行在 Bun/Node。
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256").update(s, "utf8").digest("hex");
+  // 纯 JS（@noble），手机端也能同步算
+  return Array.from(nobleSha256(new TextEncoder().encode(s)), (b) => b.toString(16).padStart(2, "0")).join("");
 }

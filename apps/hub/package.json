@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cuaremote/brain": "workspace:*",
+    "@cuaremote/cloud-computer": "workspace:*",
     "@cuaremote/protocol": "workspace:*",
     "zod": "^4.1.0"
   },

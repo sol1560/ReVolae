@@ -92,6 +92,139 @@ export class JocLedger implements CreditLedger {
   }
 }
 
+export interface RevenueCatOptions {
+  /** RevenueCat Developer API v2 的 secret key（sk_…），只放在 hub */
+  secretKey: string;
+  projectId: string;
+  /** 虚拟货币代码，默认 CRD */
+  currency?: string;
+  /** 解锁分叉的权益 lookup key，默认 pro */
+  proEntitlement?: string;
+  baseURL?: string;
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+  /** 余额 / 权益缓存秒数（webhook 到了会清掉），默认 30 */
+  cacheSec?: number;
+  now?: () => number;
+}
+
+/**
+ * RevenueCat 虚拟货币（In-App Currency）当 credit 账本：
+ * - 手机端用 RevenueCat SDK 买额度包 / 订阅，RevenueCat 按商品配置自动发放 CRD；
+ * - hub 用 Developer API v2 查余额、在 run 结算时扣（reference = runId）；
+ * - appUserId 就是 hub 的 accountId（手机登录后 Purchases.logIn(accountId)）。
+ * 虚拟货币只能是整数，扣款时向上取整（最少扣 1）。
+ */
+export class RevenueCatLedger implements CreditLedger {
+  readonly kind = "revenuecat";
+  private readonly f: typeof fetch;
+  private readonly base: string;
+  private readonly currency: string;
+  private readonly proKey: string;
+  private readonly cacheSec: number;
+  private readonly now: () => number;
+  private readonly balances = new Map<string, { v: number; at: number }>();
+  private readonly pros = new Map<string, { v: boolean; at: number }>();
+  private proEntitlementId?: Promise<string | undefined>;
+
+  constructor(private readonly o: RevenueCatOptions) {
+    this.f = o.fetch ?? fetch;
+    this.base = `${(o.baseURL ?? "https://api.revenuecat.com/v2").replace(/\/$/, "")}/projects/${encodeURIComponent(o.projectId)}`;
+    this.currency = o.currency ?? "CRD";
+    this.proKey = o.proEntitlement ?? "pro";
+    this.cacheSec = o.cacheSec ?? 30;
+    this.now = o.now ?? (() => Math.floor(Date.now() / 1000));
+  }
+
+  private async req(path: string, init: RequestInit = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+    const res = await this.f(`${this.base}${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.o.secretKey}`, ...(init.headers ?? {}) },
+      signal: AbortSignal.timeout(this.o.timeoutMs ?? 5000),
+    });
+    const text = await res.text();
+    let body: Record<string, unknown> = {};
+    try {
+      body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      /* 非 JSON */
+    }
+    return { status: res.status, body };
+  }
+
+  private customer(accountId: string) {
+    return `/customers/${encodeURIComponent(accountId)}`;
+  }
+
+  private pickBalance(body: Record<string, unknown>): number {
+    const items = (body.items as { currency_code?: string; balance?: number }[] | undefined) ?? [];
+    return Number(items.find((i) => i.currency_code === this.currency)?.balance ?? 0);
+  }
+
+  async balance(accountId: string): Promise<number> {
+    const c = this.balances.get(accountId);
+    if (c && this.now() - c.at < this.cacheSec) return c.v;
+    const r = await this.req(`${this.customer(accountId)}/virtual_currencies?include_empty_balances=true`);
+    // 还没在 RevenueCat 出现过的用户（从没打开过付费页）= 余额 0
+    const v = r.status === 404 ? 0 : r.status === 200 ? this.pickBalance(r.body) : NaN;
+    if (Number.isNaN(v)) throw new Error(`RevenueCat balance ${r.status}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    this.balances.set(accountId, { v, at: this.now() });
+    return v;
+  }
+
+  async charge(accountId: string, credits: number, ref: string, _memo: string): Promise<number> {
+    const n = Math.max(1, Math.ceil(credits));
+    const r = await this.req(`${this.customer(accountId)}/virtual_currencies/transactions`, {
+      method: "POST",
+      body: JSON.stringify({ adjustments: { [this.currency]: -n }, reference: ref }),
+    });
+    if (r.status === 422) {
+      // 余额不够：能扣多少扣多少（run 已经跑完了），剩下的记日志由调用方重试
+      this.invalidate(accountId);
+      throw new Error(`RevenueCat 余额不足（要扣 ${n} ${this.currency}）`);
+    }
+    if (r.status !== 200) throw new Error(`RevenueCat charge ${r.status}: ${JSON.stringify(r.body).slice(0, 200)}`);
+    const v = this.pickBalance(r.body);
+    this.balances.set(accountId, { v, at: this.now() });
+    return v;
+  }
+
+  /** 有没有 pro 权益（解锁分叉）。active_entitlements 只给内部 id，先按 lookup key 查一次 id 并缓存 */
+  async hasPro(accountId: string): Promise<boolean> {
+    const c = this.pros.get(accountId);
+    if (c && this.now() - c.at < this.cacheSec) return c.v;
+    this.proEntitlementId ??= this.req(`/entitlements?limit=100`).then((r) => {
+      const items = (r.body.items as { id: string; lookup_key: string }[] | undefined) ?? [];
+      return items.find((i) => i.lookup_key === this.proKey)?.id;
+    });
+    const id = await this.proEntitlementId;
+    if (!id) {
+      this.proEntitlementId = undefined; // 后台还没建这个权益，下次再查
+      return false;
+    }
+    const r = await this.req(`${this.customer(accountId)}/active_entitlements`);
+    const items = (r.body.items as { entitlement_id: string; expires_at: number | null }[] | undefined) ?? [];
+    const v = r.status === 200 && items.some((i) => i.entitlement_id === id && (i.expires_at === null || i.expires_at > Date.now()));
+    this.pros.set(accountId, { v, at: this.now() });
+    return v;
+  }
+
+  /** webhook 到了：清掉这个账号的缓存 */
+  invalidate(accountId: string) {
+    this.balances.delete(accountId);
+    this.pros.delete(accountId);
+  }
+}
+
+/** RevenueCat webhook 里我们关心的字段 */
+export interface RevenueCatWebhookEvent {
+  type: string;
+  app_user_id?: string;
+  original_app_user_id?: string;
+  aliases?: string[];
+  environment?: string;
+}
+
 export interface BillingOptions {
   ledger: CreditLedger;
   /** 每月免费云端 run 次数（默认 50） */
@@ -210,16 +343,20 @@ export class Billing {
 
 /**
  * 环境变量：
- * - `HUB_BILLING=off|local|joc`（默认：有 JOC_BASE_URL 就 joc，否则 off）
+ * - `HUB_BILLING=off|local|joc|revenuecat`（默认：有 REVENUECAT_SECRET_KEY 就 revenuecat，有 JOC_BASE_URL 就 joc，否则 off）
+ * - `REVENUECAT_SECRET_KEY` / `REVENUECAT_PROJECT_ID` / `REVENUECAT_CURRENCY`（CRD）/ `REVENUECAT_PRO_ENTITLEMENT`（pro）/ `REVENUECAT_WEBHOOK_AUTH`
  * - `JOC_BASE_URL` / `JOC_API_KEY` / `JOC_TOPUP_URL` / `JOC_BALANCE_PATH` / `JOC_CHARGE_PATH`
  * - `HUB_FREE_RUNS`（默认 50）/ `HUB_FREE_DEVICES`（1）/ `HUB_MARGIN`（0.3）/ `HUB_CREDITS_PER_USD`（100）
  */
 export function billingFromEnv(store: HubStore, env: NodeJS.ProcessEnv = process.env): Billing | undefined {
-  const mode = env.HUB_BILLING ?? (env.JOC_BASE_URL ? "joc" : "off");
+  const mode = env.HUB_BILLING ?? (env.REVENUECAT_SECRET_KEY ? "revenuecat" : env.JOC_BASE_URL ? "joc" : "off");
   if (mode === "off") return undefined;
   const now = () => Math.floor(Date.now() / 1000);
   let ledger: CreditLedger;
-  if (mode === "joc") {
+  if (mode === "revenuecat") {
+    if (!env.REVENUECAT_SECRET_KEY || !env.REVENUECAT_PROJECT_ID) throw new Error("HUB_BILLING=revenuecat 需要 REVENUECAT_SECRET_KEY 和 REVENUECAT_PROJECT_ID");
+    ledger = new RevenueCatLedger({ secretKey: env.REVENUECAT_SECRET_KEY, projectId: env.REVENUECAT_PROJECT_ID, currency: env.REVENUECAT_CURRENCY, proEntitlement: env.REVENUECAT_PRO_ENTITLEMENT });
+  } else if (mode === "joc") {
     if (!env.JOC_BASE_URL || !env.JOC_API_KEY) throw new Error("HUB_BILLING=joc 需要 JOC_BASE_URL 和 JOC_API_KEY");
     ledger = new JocLedger({ baseURL: env.JOC_BASE_URL, apiKey: env.JOC_API_KEY, topUpURL: env.JOC_TOPUP_URL, balancePath: env.JOC_BALANCE_PATH, chargePath: env.JOC_CHARGE_PATH });
   } else {

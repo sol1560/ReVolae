@@ -30,6 +30,7 @@ export const BUILTIN_MODELS: CatalogRow[] = [
   { id: "anthropic:claude-fable-5.1", label: "Claude Fable 5.1", vision: true, needsEnv: "ANTHROPIC_API_KEY", zdrEnv: "ANTHROPIC_ZDR", tier: "standard" },
   { id: "anthropic:claude-opus-5", label: "Claude Opus 5", vision: true, needsEnv: "ANTHROPIC_API_KEY", zdrEnv: "ANTHROPIC_ZDR", tier: "standard" },
   { id: "openai:gpt-6-astra", label: "GPT-6 Astra", vision: true, needsEnv: "OPENAI_API_KEY", zdrEnv: "OPENAI_ZDR", tier: "standard" },
+  { id: "zenmux:anthropic/claude-sonnet-5", label: "Claude Sonnet 5（ZenMux）", vision: true, needsEnv: "ZENMUX_API_KEY", zdrEnv: "ZENMUX_ZDR", tier: "standard" },
   { id: "zenmux:anthropic/claude-fable-5.1", label: "Claude Fable 5.1（ZenMux）", vision: true, needsEnv: "ZENMUX_API_KEY", zdrEnv: "ZENMUX_ZDR", tier: "standard" },
   { id: "zenmux:openai/gpt-6-astra", label: "GPT-6 Astra（ZenMux）", vision: true, needsEnv: "ZENMUX_API_KEY", zdrEnv: "ZENMUX_ZDR", tier: "standard" },
   { id: "ollama:muse-glimmer:30b-mlx", label: "Muse Glimmer 30B（Ollama，本机）", vision: true, tier: "local", local: true, zdr: true },

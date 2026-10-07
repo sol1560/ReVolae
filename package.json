@@ -3,7 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
-  "workspaces": ["packages/*", "apps/hub", "apps/poc-web", "firmware/dongle/calibration"],
+  "workspaces": [
+    "packages/*",
+    "apps/hub",
+    "apps/poc-web",
+    "apps/mobile",
+    "firmware/dongle/calibration"
+  ],
   "scripts": {
     "test": "bun test",
     "typecheck": "bun run --filter '*' typecheck",
@@ -12,5 +18,9 @@
   "devDependencies": {
     "typescript": "^5.9.2",
     "@types/bun": "^1.3.0"
+  },
+  "overrides": {
+    "react-native-screens": "4.26.2",
+    "react": "19.2.3"
   }
 }
