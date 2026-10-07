@@ -264,3 +264,17 @@ kind 2 的 payload（`packages/protocol/src/media.ts` / `Frame.swift` 的 `Media
 手机 ↔ hub：`billing.get{}` → `billing.status{plan: free|paid, freeRunsTotal, freeRunsUsed, periodEndsAt, credits, creditsPerUsd, freeDeviceLimit, topUpURL?}`；HTTP `GET /api/billing` 同一份。没开计费的 hub 回 `error{code:"billing_disabled"}`。
 
 credit 账本：`HUB_BILLING=joc` 用 JustOne Connector（`JOC_BASE_URL` / `JOC_API_KEY` / `JOC_TOPUP_URL`，路径默认 `/api/credits/balance` 与 `/api/credits/charge`，可用 `JOC_BALANCE_PATH` / `JOC_CHARGE_PATH` 改）。接口按「查余额 + 幂等扣款」的最小假设：`GET …/balance?account=` 回 `{credits}`；`POST …/charge {account, credits, ref, memo}` 回 `{credits}`，同 `ref` 再扣回 409 视为已扣。`HUB_BILLING=local` 用 hub 自己的 `credits` 表（开发 / 自建，`store.addCredits` 充值）。不设 = 关。
+
+## 任务结果与历史兼容
+
+`run.finished.status` 和 `HistoryItem.status` 使用可选 `RunStatus`：`succeeded`（完成）、`failed`（失败）、`denied`（用户明确拒绝）、`cancelled`（取消或连接中断后停止）。保留 `ok` 和 `run.finished.cancelled` 供旧客户端读取。状态在设备本地历史保存，不从自然语言摘要猜测。
+
+确认超时或未取得有效决定而结束的任务记为失败，不能记成用户拒绝；设备拒收一次无效签名后仍可等待有效决定。取消优先于已返回的模型答案或审批结果。取消不能撤销已完成的工具操作，步骤输出仍须保留，客户端不得显示“所有更改已撤回”。进程重启将未结束任务记为取消，不自动重发。
+
+旧记录缺少 `status` 时，只有明确 `cancelled=true` 才显示取消；否则根据 `ok` 显示完成或未完成，不从摘要中推断拒绝。历史审批始终只读，读取旧事件不能恢复可点击的批准按钮。
+
+## 快捷指令顺序
+
+手机发送 `shortcuts.reorder{shortcutIds: [...]}`，设备按当前已配对手机的存储读取列表。ID 必须恰好包含当前全部指令各一次；重复、漏项或未知 ID 返回带原请求 `ref` 的 `request_failed`，不修改已保存内容。空数组只允许对空列表使用。
+
+排序只改变位置，指令正文等字段以设备当前记录为准。成功持久化后返回 `shortcuts.list{ref, shortcuts}`，手机以匹配请求的回读结果显示成功；失败时刷新后再操作，不自动覆盖。修改已有指令保留位置，新增排在末尾，删除不改变剩余顺序；设备重启后顺序保留。此消息不执行指令，也不改变执行时的确认要求。

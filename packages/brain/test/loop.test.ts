@@ -49,14 +49,47 @@ describe("agent loop（mock 模型 + 本地宿主）", () => {
     expect(req.action.summary).toContain("echo need-ok");
   });
 
-  test("用户拒绝：这一步失败，模型收到拒绝提示后结束，run 不算成功执行", async () => {
+  test("用户拒绝：立即结束，不让模型换一种办法继续执行", async () => {
     const { deps, events } = setup("balanced", { request: async () => ({ allow: false, remember: "once" }) });
     const out = await runIntent(deps, { deviceId: "d", intent: "shell: echo nope", mode: "agent" });
     const fin = events.find((e) => e.type === "step.finished") as Extract<BrainEvent, { type: "step.finished" }>;
     expect(fin.ok).toBe(false);
     expect(fin.error).toContain("拒绝");
-    // mock 收到拒绝后不再有 tool 输出，会直接给一句话收尾
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain("未执行");
     expect(out.stepCount).toBe(1);
+    expect(events.at(-1)).toMatchObject({ status: "denied", cancelled: false });
+  });
+
+  test("确认过期属于失败，不假称用户拒绝；不执行工具", async () => {
+    const { deps, events } = setup("balanced", { request: async () => ({ allow: false, remember: "once", failure: "确认请求已过期" }) });
+    let calls = 0;
+    deps.host.call = async () => { calls++; throw new Error("不应执行"); };
+    await runIntent(deps, { deviceId: "d", intent: "shell: echo expired", mode: "agent" });
+    expect(calls).toBe(0);
+    expect(events.at(-1)).toMatchObject({ status: "failed", cancelled: false, summary: "确认请求已过期" });
+  });
+
+  test.each(["before", "response", "approval"] as const)("取消时机%s：不再执行，不误报成功或拒绝", async (when) => {
+    const ctrl = new AbortController();
+    const { deps, events } = setup("balanced", { request: async () => {
+      ctrl.abort();
+      return { allow: false, remember: "once" };
+    } });
+    let modelCalls = 0, toolCalls = 0;
+    const chat = deps.provider.chat.bind(deps.provider);
+    deps.provider.chat = async (request) => {
+      modelCalls++;
+      const result = await chat(request);
+      if (when === "response" && !request.forceTool) ctrl.abort();
+      return result;
+    };
+    deps.host.call = async () => { toolCalls++; throw new Error("不应执行"); };
+    if (when === "before") ctrl.abort();
+    await runIntent({ ...deps, signal: ctrl.signal }, { deviceId: "d", intent: when === "response" ? "只回答" : "shell: echo cancelled", mode: "agent" });
+    expect(toolCalls).toBe(0);
+    if (when === "before") expect(modelCalls).toBe(0);
+    expect(events.at(-1)).toMatchObject({ ok: false, status: "cancelled", cancelled: true });
   });
 
   test("deniedCommands：策略直接拒绝，不问用户", async () => {

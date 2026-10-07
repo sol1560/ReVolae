@@ -38,7 +38,7 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
         (m): m is Extract<AnyMessage, { type: "approval.decision" }> => m.type === "approval.decision" && m.runId === req.runId && m.stepId === req.stepId,
         (req.expiresAt - Math.floor(Date.now() / 1000)) * 1000,
       ).catch(() => null);
-      return d ? { allow: d.allow, remember: d.remember } : { allow: false, remember: "once" };
+      return d ? { allow: d.allow, remember: d.remember } : { allow: false, remember: "once", failure: "确认请求已过期，未执行" };
     },
   };
 

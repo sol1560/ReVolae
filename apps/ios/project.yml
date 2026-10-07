@@ -1,0 +1,71 @@
+name: CuaRemote
+options:
+  bundleIdPrefix: dev.cuaremote
+  deploymentTarget:
+    iOS: '18.0'
+packages:
+  CuaRemoteProtocol:
+    path: ../../packages/protocol/swift
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    CODE_SIGN_IDENTITY: '-'
+    TARGETED_DEVICE_FAMILY: '1,2'
+targets:
+  CuaRemote:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - path: AppStore/PrivacyInfo.xcprivacy
+    dependencies:
+      - package: CuaRemoteProtocol
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: CuaRemote
+        CFBundleIdentifier: dev.cuaremote.app
+        UILaunchScreen: {}
+        NSFaceIDUsageDescription: 确认你本人允许 Mac 执行显示的操作。
+        NSLocalNetworkUsageDescription: 连接你设置的本地中继，与 Mac 交换加密指令和执行结果。
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.cuaremote.app
+  CuaRemoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: Tests
+    dependencies:
+      - target: CuaRemote
+      - package: CuaRemoteProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.cuaremote.tests
+        GENERATE_INFOPLIST_FILE: YES
+  CuaRemoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: UITests
+    dependencies:
+      - target: CuaRemote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.cuaremote.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: CuaRemote
+schemes:
+  CuaRemote:
+    build:
+      targets:
+        CuaRemote: all
+        CuaRemoteTests: [test]
+        CuaRemoteUITests: [test]
+    test:
+      targets: [CuaRemoteTests, CuaRemoteUITests]
+      gatherCoverageData: false

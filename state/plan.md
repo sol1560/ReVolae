@@ -1,6 +1,20 @@
 # Mission Plan
 
+## 2026-09-21 当前执行：恢复原设计与完整产品
+
+- 用户已批准 [.agents/plans/2026-09-21-cuaremote-product-completion.plan.md](../.agents/plans/2026-09-21-cuaremote-product-completion.plan.md)，并要求本次真实端到端测试、截图和视频。
+- 该计划 todos 是本轮唯一进度来源；旧 M0–M4 的 DONE 不代表产品完成。
+- 验收逐页记录在 [docs/product-acceptance.md](../docs/product-acceptance.md)。
+- 本线程拥有 TS、消息生成、Android 和文档；现有 Mac 线程拥有原生源码及原生验证。通过文件工具同步，不能用 origin/main 覆盖未提交代码。
+
 来源：spec.md（全部里程碑一次做完）。文件归属见 decisions.md「分工」。
+
+## 2026-09-21 当前请求：真实 iPhone → Mac
+- E1 — orb：真实设备模式（身份、配对、加密、模型执行、签名确认）；真实网络预检与拒绝不执行断言。
+- E2 — sol-mac：补原生 iPhone 应用、Swift 加密/Keychain、Mac 启动入口，用独立模拟器跑 XCUITest 并检查截图。
+- E3 — orb：两台同时在线的 GitHub macOS runner，其中一台运行 iPhone 模拟器；使用同一套真实宿主与 UI 测试。保存模型密钥到 GitHub 前取得单独批准。
+- E4 — sol-mac：只读确认 VM 可行性与 CPU/内存/磁盘限制，不安装镜像、不更改主机设置。
+- 本次不把旧 spec 的 SSH、iPad、Android、App Store 等未完成项目标成完成，也不以假页面替代。
 
 ## M0 PoC
 - F0.1 monorepo 初始化 — orb — 无依赖

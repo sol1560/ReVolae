@@ -256,19 +256,22 @@ export class HubStore {
 
   // ── 6 位码 ──
   putPairCode(code: string, deviceId: string, offer: PairOffer, expiresAt: number) {
-    this.db.query("INSERT OR REPLACE INTO pair_codes (code, device_id, offer_json, expires_at) VALUES (?, ?, ?, ?)").run(code, deviceId, JSON.stringify(offer), expiresAt);
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM pair_codes WHERE device_id = ?").run(deviceId);
+      this.db.query("INSERT INTO pair_codes (code, device_id, offer_json, expires_at) VALUES (?, ?, ?, ?)").run(code, deviceId, JSON.stringify(offer), expiresAt);
+    })();
   }
 
   takePairCode(code: string, now: number): PairOffer | null {
     const r = this.db.query<{ offer_json: string; expires_at: number }, [string]>("SELECT offer_json, expires_at FROM pair_codes WHERE code = ?").get(code);
     if (!r) return null;
     this.db.query("DELETE FROM pair_codes WHERE code = ?").run(code);
-    if (r.expires_at < now) return null;
+    if (r.expires_at <= now) return null;
     return JSON.parse(r.offer_json) as PairOffer;
   }
 
   purgeExpiredPairCodes(now: number) {
-    this.db.query("DELETE FROM pair_codes WHERE expires_at < ?").run(now);
+    this.db.query("DELETE FROM pair_codes WHERE expires_at <= ?").run(now);
   }
 
   // ── push ──

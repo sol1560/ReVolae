@@ -221,6 +221,23 @@ describe("TerminalManager：路由、验签、上限", () => {
     expect(() => new TerminalManager({ deviceId: "mac-1", spawn: () => new FakePty(), sendFrame: s.sendFrame, sendMsg: s.sendMsg })).toThrow(/phoneKeys|unsafeUnsigned/);
   });
 
+  test("签名有效但持久保存失败：不得启动shell，也不发送opened", () => {
+    const s = sink();
+    const keys = generateSigningKeyPair("ES256");
+    let spawns = 0;
+    const mgr = new TerminalManager({
+      deviceId: "mac-1", phoneKeys: { sig: b64(keys.publicKey), sigAlg: "ES256" },
+      now: () => now, sendFrame: s.sendFrame, sendMsg: s.sendMsg,
+      consumeNonce: () => { throw new Error("disk full"); },
+      spawn: () => { spawns++; return new FakePty(); },
+    });
+    const signature = signTerminalOpen({ sessionId: "a", deviceId: "mac-1", privateKey: keys.privateKey, alg: "ES256", keyId: "phone", nonce: "once", expiresAt: now + 100 });
+    mgr.handle(open("a", { signature }));
+    expect(spawns).toBe(0);
+    expect(s.types()).toEqual(["error"]);
+    expect(errors(s)).toEqual(["approval_storage"]);
+  });
+
   test("不传 firstStreamId 时按时间取种子：重启后的新管理器不会重用上一轮的 streamId 1", () => {
     const s = sink();
     const mgr = new TerminalManager({ deviceId: "mac-1", unsafeUnsigned: true, spawn: () => new FakePty(), sendFrame: s.sendFrame, sendMsg: s.sendMsg, now: () => now });

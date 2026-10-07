@@ -74,6 +74,8 @@ export const ModelEntry = z.object({
   /** 每百万 token 美元；本地为 0 */
   priceIn: z.number().nonnegative(),
   priceOut: z.number().nonnegative(),
+  /** true 表示费率未核实，数值不能显示为免费。 */
+  unknownPrice: z.boolean().optional(),
   /** 这台大脑上现在能不能直接用（key 在不在 / 本地服务在不在） */
   available: z.boolean(),
   /** 不能用的原因，如「缺少环境变量 ZENMUX_API_KEY」 */
@@ -88,6 +90,8 @@ export const Cost = z.object({
   outputTokens: z.number().int().nonnegative(),
   jevTokens: z.number().int().nonnegative().default(0),
   usd: z.number().nonnegative(),
+  /** 含价格未核实的调用，usd 仅为已知部分，不能用于结算或显示总价。 */
+  unknownPrice: z.boolean().optional(),
 });
 export type Cost = z.infer<typeof Cost>;
 
@@ -238,6 +242,9 @@ export const Shortcut = z.object({
 });
 export type Shortcut = z.infer<typeof Shortcut>;
 
+export const RunStatus = z.enum(["succeeded", "failed", "denied", "cancelled"]);
+export type RunStatus = z.infer<typeof RunStatus>;
+
 export const HistoryItem = z.object({
   runId: z.string(),
   deviceId: z.string(),
@@ -245,6 +252,8 @@ export const HistoryItem = z.object({
   startedAt: z.number().int(),
   finishedAt: z.number().int().optional(),
   ok: z.boolean().optional(),
+  /** 旧记录可能没有明确分类，客户端不能根据摘要猜测拒绝。 */
+  status: RunStatus.optional(),
   summary: z.string().optional(),
   cost: Cost.optional(),
   stepCount: z.number().int().optional(),
@@ -307,6 +316,16 @@ export const DeviceStats = z.object({
   runningApps: z.array(z.string()),
   cpuPercent: z.number().optional(),
   memUsedMB: z.number().optional(),
+  memTotalMB: z.number().optional(),
+  diskFreeGB: z.number().optional(),
   uptimeSec: z.number().optional(),
 });
 export type DeviceStats = z.infer<typeof DeviceStats>;
+
+export const InstalledApp = z.object({
+  bundleId: z.string(),
+  name: z.string(),
+  running: z.boolean(),
+  learned: z.boolean(),
+});
+export type InstalledApp = z.infer<typeof InstalledApp>;

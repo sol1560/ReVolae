@@ -1,0 +1,5 @@
+Generated/
+*.xcodeproj/
+.build/
+.runtime/
+*.xcresult/

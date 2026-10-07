@@ -18,6 +18,7 @@ import {
   signApproval,
   verifyApprovalSignature,
   decodeRelay,
+  encodeRelay,
 } from "../src/index.js";
 
 const vec = JSON.parse(readFileSync(new URL("../fixtures/rfc9180-a2-3.json", import.meta.url), "utf8")) as {
@@ -63,6 +64,43 @@ describe("HPKE 套件对得上 RFC 9180 A.2.3（X25519 / HKDF-SHA256 / ChaCha20P
 });
 
 describe("E2ELink 双向链路", () => {
+  test("等待对方握手后顺序发送并发帧；关闭连接使待发送失败；拒绝旧握手", async () => {
+    const aKeys = await generateKemKeyPair();
+    const bKeys = await generateKemKeyPair();
+    const a = await E2ELink.create({ selfId: "a", self: aKeys, peerId: "b", peerPublicKey: bKeys.publicKey });
+    const b = await E2ELink.create({ selfId: "b", self: bKeys, peerId: "a", peerPublicKey: aKeys.publicKey });
+    const old = decodeRelay(a.handshake());
+    await expect(b.openRelay(encodeRelay({ ...old, body: old.body.subarray(1, 33) }))).rejects.toThrow("版本");
+    await b.openRelay(a.handshake());
+    let sent = false;
+    const sending = Promise.all([a.sealFrame(new Uint8Array([17])), a.sealFrame(new Uint8Array([29, 31]))]).then((frames) => { sent = true; return frames; });
+    await Bun.sleep(10);
+    expect(sent).toBe(false);
+    await a.openRelay(b.handshake());
+    const frames = await sending;
+    expect(await b.openRelay(frames[0]!)).toEqual(new Uint8Array([17]));
+    expect(await b.openRelay(frames[1]!)).toEqual(new Uint8Array([29, 31]));
+    const pending = await E2ELink.create({ selfId: "a", self: aKeys, peerId: "b", peerPublicKey: bKeys.publicKey });
+    const result = pending.sealFrame(new Uint8Array([1]));
+    pending.close();
+    await expect(result).rejects.toThrow("关闭");
+  });
+
+  test("接收端重启后整段旧握手加密文重放也必须失败", async () => {
+    const aKeys = await generateKemKeyPair();
+    const bKeys = await generateKemKeyPair();
+    const a = await E2ELink.create({ selfId: "a", self: aKeys, peerId: "b", peerPublicKey: bKeys.publicKey });
+    const b = await E2ELink.create({ selfId: "b", self: bKeys, peerId: "a", peerPublicKey: aKeys.publicKey });
+    const oldHandshake = a.handshake();
+    await b.openRelay(oldHandshake);
+    await a.openRelay(b.handshake());
+    const cipher = await a.sealFrame(controlFrame({ type: "intent.submit", text: "执行一次" }));
+    expect(await b.openRelay(cipher)).not.toBeNull();
+    const restarted = await E2ELink.create({ selfId: "b", self: bKeys, peerId: "a", peerPublicKey: aKeys.publicKey });
+    await restarted.openRelay(oldHandshake);
+    await expect(restarted.openRelay(cipher)).rejects.toThrow();
+  });
+
   test("握手 + 双向密文 + aad 绑定信封头", async () => {
     const kMac = await generateKemKeyPair();
     const kPhone = await generateKemKeyPair();
@@ -79,7 +117,7 @@ describe("E2ELink 双向链路", () => {
     const env = decodeRelay(sealed);
     expect(env.encrypted).toBe(true);
     expect(env.to).toBe("mac-1");
-    expect(env.body.byteLength).toBe(f1.byteLength + 16);
+    expect(env.body.byteLength).toBe(f1.byteLength + 32 + 16);
     const got = await mac.openRelay(sealed);
     expect(parseControl(decodeFrame(got!))).toEqual({ v: 1, id: "1", type: "stats.get" });
 
@@ -108,6 +146,7 @@ describe("E2ELink 双向链路", () => {
     const kB = await generateKemKeyPair();
     const a = await E2ELink.create({ selfId: "a", self: kA, peerId: "b", peerPublicKey: kB.publicKey });
     const b = await E2ELink.create({ selfId: "b", self: kB, peerId: "a", peerPublicKey: kA.publicKey });
+    await a.openRelay(b.handshake());
     await expect(b.openRelay(await a.sealFrame(new Uint8Array([0, 0, 0, 0, 0]))).then(() => "ok")).rejects.toThrow(/没收到对端握手/);
     await b.openRelay(a.handshake());
     await expect(b.openRelay(a.handshake())).rejects.toThrow(/重复握手/);
@@ -119,13 +158,14 @@ describe("E2ELink 双向链路", () => {
     const a = await E2ELink.create({ selfId: "a", self: kA, peerId: "b", peerPublicKey: kB.publicKey });
     const b = await E2ELink.create({ selfId: "b", self: kB, peerId: "a", peerPublicKey: kA.publicKey });
     await b.openRelay(a.handshake());
+    await a.openRelay(b.handshake());
     const c = await a.sealFrame(controlFrame({ v: 1, id: "1", type: "stats.get" }));
     expect(await b.openRelay(c)).not.toBeNull();
     await expect(b.openRelay(c)).rejects.toThrow();
   });
 
   test("sessionInfo 含方向：a→b 与 b→a 不同", () => {
-    expect(new TextDecoder().decode(sessionInfo("a", "b"))).toBe("cuaremote-v1|a|b");
+    expect(new TextDecoder().decode(sessionInfo("a", "b"))).toBe("cuaremote-v2|a|b");
     expect(hex.to(sessionInfo("a", "b"))).not.toBe(hex.to(sessionInfo("b", "a")));
   });
 });
@@ -217,8 +257,8 @@ describe("审批签名验签", () => {
 
 describe("Swift 互通向量（fixtures/hpke.json、approval.json）可回放", () => {
   const hp = JSON.parse(readFileSync(new URL("../fixtures/hpke.json", import.meta.url), "utf8")) as {
-    phone: { id: string; ikm: string; pk: string; sk: string; ekm: string };
-    mac: { id: string; ikm: string; pk: string; sk: string; ekm: string };
+    phone: { id: string; ikm: string; pk: string; sk: string; ekm: string; nonce: string };
+    mac: { id: string; ikm: string; pk: string; sk: string; ekm: string; nonce: string };
     infoPhoneToMac: string; aadPhoneToMac: string; phoneHandshake: string; macHandshake: string;
     plaintexts: string[]; phoneToMac: string[]; macToPhonePlaintext: string; macToPhone: string;
     exporter: { context: string; length: number; value: string };
@@ -234,28 +274,28 @@ describe("Swift 互通向量（fixtures/hpke.json、approval.json）可回放", 
     expect(hex.to(mac.privateKey)).toBe(hp.mac.sk);
     expect(hex.to(sessionInfo(hp.phone.id, hp.mac.id))).toBe(hp.infoPhoneToMac);
     expect(hex.to(relayHeader({ to: hp.mac.id, from: hp.phone.id, encrypted: true }))).toBe(hp.aadPhoneToMac);
-    const link = await E2ELink.create({ selfId: hp.phone.id, self: phone, peerId: hp.mac.id, peerPublicKey: mac.publicKey, ekm: hex.from(hp.phone.ekm) });
+    const link = await E2ELink.create({ selfId: hp.phone.id, self: phone, peerId: hp.mac.id, peerPublicKey: mac.publicKey, ekm: hex.from(hp.phone.ekm), nonce: hex.from(hp.phone.nonce) });
     expect(hex.to(link.handshake())).toBe(hp.phoneHandshake);
   });
 
   test("Mac 侧只用向量里的 sk + enc 就能解出手机发的两帧，并且顺序不能换", async () => {
     const mac = await deriveKemKeyPair(hex.from(hp.mac.ikm));
-    const enc = decodeRelay(hex.from(hp.phoneHandshake)).body;
+    const enc = decodeRelay(hex.from(hp.phoneHandshake)).body.subarray(1, 33);
     const opener = await OpenContext.create({ self: mac, peerPublicKey: hex.from(hp.phone.pk), enc, from: hp.phone.id, to: hp.mac.id });
     const aad = hex.from(hp.aadPhoneToMac);
     for (let i = 0; i < hp.phoneToMac.length; i++) {
       const env = decodeRelay(hex.from(hp.phoneToMac[i]!));
-      expect(hex.to(await opener.open(aad, env.body))).toBe(hp.plaintexts[i]!);
+      expect(hex.to(await opener.open(aad, env.body))).toBe(hp.mac.nonce + hp.plaintexts[i]!);
     }
     // 第二帧再喂一次 → seq 已经过了，必须失败（防重放）
     const again = decodeRelay(hex.from(hp.phoneToMac[1]!));
     await expect(opener.open(aad, again.body)).rejects.toThrow();
     // 反向：手机解 Mac 发的
     const phone = await deriveKemKeyPair(hex.from(hp.phone.ikm));
-    const macEnc = decodeRelay(hex.from(hp.macHandshake)).body;
+    const macEnc = decodeRelay(hex.from(hp.macHandshake)).body.subarray(1, 33);
     const phoneOpener = await OpenContext.create({ self: phone, peerPublicKey: hex.from(hp.mac.pk), enc: macEnc, from: hp.mac.id, to: hp.phone.id });
     const m2p = decodeRelay(hex.from(hp.macToPhone));
-    expect(hex.to(await phoneOpener.open(relayHeader({ to: hp.phone.id, from: hp.mac.id, encrypted: true }), m2p.body))).toBe(hp.macToPhonePlaintext);
+    expect(hex.to(await phoneOpener.open(relayHeader({ to: hp.phone.id, from: hp.mac.id, encrypted: true }), m2p.body))).toBe(hp.phone.nonce + hp.macToPhonePlaintext);
     // exporter
     const sealer = await SealContext.create({ self: phone, peerPublicKey: hex.from(hp.mac.pk), from: hp.phone.id, to: hp.mac.id, ekm: hex.from(hp.phone.ekm) });
     expect(hex.to(await sealer.export(hex.from(hp.exporter.context), hp.exporter.length))).toBe(hp.exporter.value);

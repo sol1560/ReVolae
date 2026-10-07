@@ -1,5 +1,5 @@
 import type { BrainLocation, ModelEntry, ModelTier, PrivacySettings } from "@cuaremote/protocol";
-import { createProvider, lookupPrice } from "./providers.js";
+import { createProvider, localModelURL, lookupPrice } from "./providers.js";
 import type { Provider } from "./types.js";
 
 /**
@@ -25,7 +25,7 @@ interface CatalogRow {
   local?: boolean;
 }
 
-/** 内置清单。价格在 providers.ts 的 PRICES 里，这里不重复。 */
+/** 内置清单仅表示支持的配置；存在密钥不代表账号已获该模型使用资格。 */
 export const BUILTIN_MODELS: CatalogRow[] = [
   { id: "anthropic:claude-fable-5.1", label: "Claude Fable 5.1", vision: true, needsEnv: "ANTHROPIC_API_KEY", zdrEnv: "ANTHROPIC_ZDR", tier: "standard" },
   { id: "anthropic:claude-opus-5", label: "Claude Opus 5", vision: true, needsEnv: "ANTHROPIC_API_KEY", zdrEnv: "ANTHROPIC_ZDR", tier: "standard" },
@@ -61,31 +61,42 @@ export function listModels(o: CatalogOptions = {}): ModelEntry[] {
         available = false;
         unavailableReason = r.id.startsWith("ollama:") ? "本机 Ollama 没在运行" : "本机 LM Studio 没在运行";
       }
+      try { createProvider(r.id, env); }
+      catch (e) { available = false; unavailableReason = e instanceof Error ? e.message : String(e); }
     }
     // 账号级 ZDR 开着的模型同时算 zdr 档位可选；tier 字段报「最严格能满足的档位」
     const tier: ModelTier = r.local ? "local" : zdr ? "zdr" : "standard";
-    return { id: r.id, label: r.label, provider: r.id.slice(0, r.id.indexOf(":")), tier, zdr, vision: r.vision, priceIn: price.priceIn, priceOut: price.priceOut, available, unavailableReason, custom: false };
+    return { id: r.id, label: r.label, provider: r.id.slice(0, r.id.indexOf(":")), tier, zdr, vision: r.vision, ...price, available, unavailableReason, custom: false };
   });
   for (const c of o.custom ?? []) {
+    if (rows.some((row) => row.id === c.id)) continue;
     const provider = c.id.slice(0, Math.max(0, c.id.indexOf(":")));
     const price = lookupPrice(c.id);
-    const available = true; // 自带网关允许无 key，能不能连上要等真正调用时才知道
-    rows.push({ id: c.id, label: c.label ?? c.id, provider, tier: "byok", zdr: c.zdr ?? env.OPENAI_COMPAT_ZDR === "1", vision: true, priceIn: price.priceIn, priceOut: price.priceOut, available, custom: true });
+    let info: Provider["info"] | undefined;
+    let unavailableReason: string | undefined;
+    try {
+      info = createProvider(c.id, env).info;
+      if (provider === "mock") throw new Error("测试模型不能用于设备");
+      if (provider === "ollama" && !o.localUp?.ollama) throw new Error("本机 Ollama 没在运行");
+      if (provider === "lmstudio" && !o.localUp?.lmstudio) throw new Error("本机 LM Studio 没在运行");
+    } catch (e) { unavailableReason = e instanceof Error ? e.message : String(e); }
+    rows.push({ id: c.id, label: c.label ?? c.id, provider, tier: info?.tier ?? "standard", zdr: info?.zdr ?? false,
+      vision: info?.vision ?? false, ...price, available: !unavailableReason, unavailableReason, custom: true });
   }
   return rows;
 }
 
 /** 探测本机 Ollama / LM Studio 是否在跑（各 800ms 超时；失败就当没开） */
 export async function probeLocal(env: Env = process.env): Promise<{ ollama: boolean; lmstudio: boolean }> {
-  const hit = async (url: string) => {
+  const hit = async (provider: "ollama" | "lmstudio", path: string) => {
     try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(800) });
+      const r = await fetch(`${localModelURL(provider, env)}${path}`, { signal: AbortSignal.timeout(800), redirect: "error" });
       return r.ok;
     } catch {
       return false;
     }
   };
-  const [ollama, lmstudio] = await Promise.all([hit(`${env.OLLAMA_HOST ?? "http://127.0.0.1:11434"}/api/tags`), hit(`${env.LMSTUDIO_HOST ?? "http://127.0.0.1:1234/v1"}/models`)]);
+  const [ollama, lmstudio] = await Promise.all([hit("ollama", "/api/tags"), hit("lmstudio", "/models")]);
   return { ollama, lmstudio };
 }
 

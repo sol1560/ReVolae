@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { listModels, resolveProvider, tierAccepts, catalogMessage } from "../src/llm/catalog.js";
+import { listModels, resolveProvider, tierAccepts, catalogMessage, probeLocal } from "../src/llm/catalog.js";
+import { createProvider } from "../src/llm/providers.js";
 
 const KEYS = { ANTHROPIC_API_KEY: "a", OPENAI_API_KEY: "o", ZENMUX_API_KEY: "z" };
 
@@ -58,6 +59,43 @@ describe("resolveProvider 档位强制", () => {
   test("缺 key 的报错原样冒出（不是档位错）", () => {
     expect(() => resolveProvider({ settings: { modelTier: "standard", cloudModel: "openai:gpt-6-astra" }, defaultModel: "mock", env: {} })).toThrow(/OPENAI_API_KEY/);
   });
+
+  test("本机模型拒绝远程地址和带认证的URL，目录与实际选择保持一致", async () => {
+    for (const url of ["https://models.example/v1", "http://192.168.1.8:11434", "http://localhost.evil.test", "ftp://127.0.0.1", "http://user:password@127.0.0.1", "http://127.0.0.1/#remote"]) {
+      const env = { OLLAMA_HOST: url, LMSTUDIO_HOST: url };
+      for (const model of ["ollama:test", "lmstudio:test"]) {
+        expect(() => resolveProvider({ settings: { modelTier: "local" }, defaultModel: model, env })).toThrow(/本机/);
+      }
+      const local = listModels({ env, localUp: { ollama: true, lmstudio: true } }).filter((m) => m.tier === "local");
+      expect(local.every((m) => !m.available && m.unavailableReason?.includes("本机"))).toBe(true);
+      expect(await probeLocal(env)).toEqual({ ollama: false, lmstudio: false });
+    }
+  });
+
+  test("本机探测与实际调用不跟随跳转，直接回环连接仍可用", async () => {
+    let forwarded = 0;
+    const target = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => { forwarded++; return new Response("不应发送到这里"); } });
+    let redirect = true;
+    const local = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => redirect
+      ? Response.redirect(`http://127.0.0.1:${target.port}`)
+      : Response.json({ content: [{ type: "text", text: "本机响应" }], choices: [{ message: { content: "本机响应" }, finish_reason: "stop" }] }),
+    });
+    try {
+      const env = { OLLAMA_HOST: `http://localhost:${local.port}`, LMSTUDIO_HOST: `http://127.0.0.1:${local.port}` };
+      expect(await probeLocal(env)).toEqual({ ollama: false, lmstudio: false });
+      const req = { messages: [{ role: "user" as const, content: [{ type: "text" as const, text: "不得外发" }] }], tools: [] };
+      for (const model of ["ollama:test", "lmstudio:test"]) {
+        await expect(createProvider(model, env).chat(req)).rejects.toThrow();
+      }
+      expect(forwarded).toBe(0);
+      redirect = false;
+      expect(await probeLocal(env)).toEqual({ ollama: true, lmstudio: true });
+      for (const model of ["ollama:test", "lmstudio:test"]) {
+        expect((await createProvider(model, env).chat(req)).text).toBe("本机响应");
+      }
+      expect(createProvider("ollama:v6", { OLLAMA_HOST: "http://[::1]:11434" }).info.tier).toBe("local");
+    } finally { local.stop(true); target.stop(true); }
+  });
 });
 
 describe("tierAccepts", () => {
@@ -102,6 +140,19 @@ describe("listModels", () => {
     const rows = listModels({ env: {}, custom: [{ id: "openai-compat:foo@http://gw/v1", label: "我的网关" }] });
     const c = rows.find((r) => r.custom)!;
     expect(c).toMatchObject({ id: "openai-compat:foo@http://gw/v1", label: "我的网关", provider: "openai-compat", tier: "byok", available: true });
+  });
+
+  test("自填官方模型仍检查密钥，本地模型保留本地档位且去重，远程价格未知", () => {
+    const rows = listModels({ env: {}, localUp: { ollama: true }, custom: [
+      { id: "zenmux:openai/gpt-4.1-mini" }, { id: "ollama:installed" },
+      { id: "ollama:installed" }, { id: "openai-compat:test@http://gateway/v1" },
+    ] });
+    const byId = index(rows);
+    expect(byId("zenmux:openai/gpt-4.1-mini")).toMatchObject({ available: false, unknownPrice: true });
+    expect(byId("zenmux:openai/gpt-4.1-mini").unavailableReason).toContain("ZENMUX_API_KEY");
+    expect(byId("ollama:installed")).toMatchObject({ available: true, tier: "local", unknownPrice: false });
+    expect(rows.filter((row) => row.id === "ollama:installed")).toHaveLength(1);
+    expect(byId("openai-compat:test@http://gateway/v1").unknownPrice).toBe(true);
   });
 
   test("catalogMessage 产出 models.catalog 报文", () => {

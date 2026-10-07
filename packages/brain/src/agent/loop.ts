@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { approvalChallenge, type Channel, type ConcreteAction, type Cost, type DeviceToPhone, type Level, type MsgBody, type PlanStep, type ToolDescriptor } from "@cuaremote/protocol";
+import { approvalChallenge, type Channel, type ConcreteAction, type Cost, type DeviceToPhone, type Level, type MsgBody, type PlanStep, type RunStatus, type ToolDescriptor } from "@cuaremote/protocol";
 import { CuaDriver } from "../gui/cua-driver.js";
 import { jevAxDecide, toCuaCall } from "../gui/jev-ax.js";
 import type { Host, ToolResult } from "../host/types.js";
@@ -21,7 +21,8 @@ export interface ApprovalRequest {
   expiresAt: number;
 }
 export interface ApprovalGate {
-  request(req: ApprovalRequest): Promise<{ allow: boolean; remember: "once" | "always" }>;
+  /** failure 表示未取得有效决定（如超时），不能记录成用户拒绝。 */
+  request(req: ApprovalRequest): Promise<{ allow: boolean; remember: "once" | "always"; failure?: string }>;
 }
 
 export interface AgentDeps {
@@ -49,6 +50,7 @@ export interface RunInput {
 export interface RunOutcome {
   runId: string;
   ok: boolean;
+  status: RunStatus;
   summary: string;
   cost: Cost;
   stepCount: number;
@@ -119,8 +121,6 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   const recent: string[] = [];
   const plan: PlanStep[] = [];
   let stepCount = 0;
-  let cancelled = false;
-  deps.signal?.addEventListener("abort", () => (cancelled = true));
 
   const { tools: hostTools, scope } = await deps.host.listTools();
   const guiTools = deps.gui?.running ? deps.gui.descriptors() : [];
@@ -145,14 +145,18 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     cost.inputTokens += u.inputTokens;
     cost.outputTokens += u.outputTokens;
     cost.usd += (u.inputTokens * deps.provider.info.priceIn + u.outputTokens * deps.provider.info.priceOut) / 1e6;
+    if (deps.provider.info.unknownPrice) cost.unknownPrice = true;
   };
-  const finish = (ok: boolean, summary: string): RunOutcome => {
-    const out = { runId, ok, summary, cost: { ...cost }, stepCount, cancelled };
+  const finish = (ok: boolean, summary: string, status: RunStatus = ok ? "succeeded" : "failed"): RunOutcome => {
+    const cancelled = deps.signal?.aborted ?? false;
+    const out: RunOutcome = { runId, ok: ok && !cancelled, status: cancelled ? "cancelled" : status,
+      summary: cancelled ? "任务已取消" : summary, cost: { ...cost }, stepCount, cancelled };
     deps.emit({ type: "run.finished", ...out });
     deps.log?.({ t: "run.finished", ...out });
     return out;
   };
 
+  if (deps.signal?.aborted) return finish(false, "任务已取消");
   // 1. 计划
   try {
     const r = await deps.provider.chat({ messages, tools: modelTools, forceTool: "propose_plan", signal: deps.signal });
@@ -174,7 +178,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   // 2. 逐步执行
   let planCursor = 0;
   while (true) {
-    if (cancelled) return finish(false, "用户取消");
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
     if (stepCount >= maxSteps) return finish(false, `超过 ${maxSteps} 步上限`);
     if (cost.usd > maxUsd) return finish(false, `超过本次预算 $${maxUsd}`);
 
@@ -185,6 +189,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       return finish(false, `模型调用失败：${e instanceof Error ? e.message : e}`);
     }
     addUsage(resp.usage);
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
     const call: ToolCall | undefined = resp.toolCalls[0];
     if (!call) {
       plan.forEach((s) => { if (s.status === "pending" || s.status === "running") s.status = "done"; });
@@ -240,15 +245,14 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       const challenge = approvalChallenge({ runId, stepId: step.id, actionDetail: action.detail, nonce, expiresAt });
       deps.emit({ type: "step.approval_required", runId, stepId: step.id, level: decision.level, action, reason: decision.reason, expiresAt, challenge });
       const a = await deps.approvals.request({ runId, stepId: step.id, level: decision.level, action, reason: decision.reason, challenge, expiresAt });
+      if (deps.signal?.aborted) return finish(false, "任务已取消");
       if (a.allow && a.remember === "always" && decision.level < 2) deps.policy.remember(action);
       verdict = a.allow ? "allow" : "deny";
       if (!a.allow) {
         step.status = "failed";
-        deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error: "用户拒绝了这一步" });
-        messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: "用户拒绝了这个操作。请换一种不需要这个操作的办法，或者停止并说明。" }] });
-        recent.push(`拒绝: ${action.summary}`);
-        planCursor = stepIdx + 1;
-        continue;
+        deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error: a.failure ?? "用户拒绝了这一步" });
+        deps.emit({ type: "plan.updated", runId, plan: [...plan] });
+        return finish(false, a.failure ?? "用户拒绝了这一步，未执行", a.failure ? "failed" : "denied");
       }
     }
     if (verdict === "deny") {
@@ -259,6 +263,8 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       planCursor = stepIdx + 1;
       continue;
     }
+
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
 
     // 执行
     let result: ToolResult;

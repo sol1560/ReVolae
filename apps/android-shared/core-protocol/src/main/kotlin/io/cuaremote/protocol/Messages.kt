@@ -21,6 +21,8 @@ data class AuthChallenge(override val v: Int = 1, override val id: String, val n
 data class AuthResponse(override val v: Int = 1, override val id: String, val nonce: String, val signature: String) : WireMessage
 @Serializable @SerialName("auth.ok")
 data class AuthOk(override val v: Int = 1, override val id: String, val sessionToken: String, val expiresAt: Long) : WireMessage
+@Serializable @SerialName("presence")
+data class Presence(override val v: Int = 1, override val id: String, val deviceId: String, val online: Boolean, val lastSeen: Long) : WireMessage
 @Serializable @SerialName("peer.keys")
 data class PeerKeys(override val v: Int = 1, override val id: String, val deviceId: String, val pubKeys: PublicKeys) : WireMessage
 

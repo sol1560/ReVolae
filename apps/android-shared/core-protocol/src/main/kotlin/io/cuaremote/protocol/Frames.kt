@@ -16,7 +16,8 @@ data class Frame(val kind: FrameKind, val streamId: Long, val payload: ByteArray
         fun decode(bytes: ByteArray): Frame {
             require(bytes.size >= 5) { "frame too short" }
             val b = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
-            val kind = FrameKind.entries.firstOrNull { it.code == b.get() } ?: error("bad frame kind")
+            val code = b.get()
+            val kind = FrameKind.entries.firstOrNull { it.code == code } ?: error("bad frame kind")
             return Frame(kind, b.int.toLong() and 0xffffffffL, ByteArray(b.remaining()).also(b::get))
         }
         fun control(message: WireMessage, streamId: Long = 0) = Frame(FrameKind.CONTROL, streamId, ProtocolJson.encode(message).toByteArray(StandardCharsets.UTF_8))

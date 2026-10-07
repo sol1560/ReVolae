@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AppInventory, CapabilityCard as CapabilityCardSchema, approvalChallenge, type CapabilityCard, type Cost, type InventoryItem, type ToolDescriptor } from "@cuaremote/protocol";
+import { AppInventory, CapabilityCard as CapabilityCardSchema, approvalChallenge, type CapabilityCard, type Cost, type InventoryItem, type RunStatus, type ToolDescriptor } from "@cuaremote/protocol";
 import { describe, type ApprovalGate, type BrainEvent } from "../agent/loop.js";
 import type { CuaDriver } from "../gui/cua-driver.js";
 import type { Host } from "../host/types.js";
@@ -72,7 +72,7 @@ export async function learnApp(deps: LearnDeps, input: LearnInput): Promise<Lear
   }
 
   for (const phase of PHASES) {
-    if (deps.signal?.aborted) break;
+    deps.signal?.throwIfAborted();
     progress(phase);
     const r = await deps.host.call(INVENTORY_TOOL, { bundleId: input.bundleId, phase }, 120_000);
     if (!r.ok) {
@@ -90,6 +90,7 @@ export async function learnApp(deps: LearnDeps, input: LearnInput): Promise<Lear
     progress(phase, parsed.data.truncated ? "条目太多，已截断" : undefined);
   }
 
+  deps.signal?.throwIfAborted();
   if (input.explore) {
     // GUI 探索（真的去点界面）留给 F3 阶段；先明确告诉用户跳过了
     progress("explore", deps.gui ? "GUI 探索还没接上，先跳过" : "没有 GUI 通道，跳过探索");
@@ -108,10 +109,13 @@ export async function learnApp(deps: LearnDeps, input: LearnInput): Promise<Lear
     ],
     tools: [PROPOSE_CARDS_TOOL],
     forceTool: PROPOSE_CARDS_TOOL.name,
+    signal: deps.signal,
   });
+  deps.signal?.throwIfAborted();
   cost.inputTokens += res.usage.inputTokens;
   cost.outputTokens += res.usage.outputTokens;
   cost.usd += (res.usage.inputTokens * deps.provider.info.priceIn + res.usage.outputTokens * deps.provider.info.priceOut) / 1_000_000;
+  if (deps.provider.info.unknownPrice) cost.unknownPrice = true;
   const call = res.toolCalls.find((c) => c.name === PROPOSE_CARDS_TOOL.name);
   const proposed = Array.isArray(call?.args.cards) ? (call!.args.cards as unknown[]) : [];
   const v = validateCards({ bundleId: input.bundleId, appName, proposed, inventory, tools });
@@ -144,11 +148,14 @@ export interface RunCardDeps {
   /** 给策略引擎「意图」和事件里的 deviceId */
   deviceId: string;
   providerId?: string;
+  runId?: string;
+  signal?: AbortSignal;
 }
 
 export interface RunCardOutcome {
   runId: string;
   ok: boolean;
+  status: RunStatus;
   output?: string;
   error?: string;
   cost: Cost;
@@ -156,19 +163,22 @@ export interface RunCardOutcome {
 
 /** 跑一张卡：渲染 → 策略 → （确认）→ 执行。事件和 agent loop 一致，手机上复用同一条时间线。 */
 export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: Record<string, string>): Promise<RunCardOutcome> {
-  const runId = randomUUID();
+  const runId = deps.runId ?? randomUUID();
   const stepId = "s1";
   const cost: Cost = { inputTokens: 0, outputTokens: 0, jevTokens: 0, usd: 0 };
   const intent = `卡片「${card.name}」（${card.appName}）`;
-  const finish = (ok: boolean, summary: string, extra: { output?: string; error?: string } = {}): RunCardOutcome => {
-    deps.emit({ type: "run.finished", runId, ok, summary, cost, stepCount: 1, cancelled: false });
-    return { runId, ok, cost, ...extra };
+  const finish = (ok: boolean, summary: string, extra: { output?: string; error?: string; status?: RunStatus } = {}): RunCardOutcome => {
+    const cancelled = deps.signal?.aborted ?? false;
+    const status = cancelled ? "cancelled" : extra.status ?? (ok ? "succeeded" : "failed");
+    deps.emit({ type: "run.finished", runId, ok: ok && !cancelled, status, summary: cancelled ? "任务已取消" : summary, cost, stepCount: 1, cancelled });
+    return { runId, cost, ...extra, ok: ok && !cancelled, status };
   };
 
   const { tools, scope } = await deps.host.listTools();
   const toolName = CARD_TOOL[card.action.kind];
   const tool: ToolDescriptor | undefined = tools.find((t) => t.name === toolName);
   deps.emit({ type: "run.created", runId, deviceId: deps.deviceId, intent, provider: deps.providerId ?? "card", plan: [{ id: stepId, title: card.name, channel: tool?.channel, staticLevel: card.staticLevel, status: "pending" }] });
+  if (deps.signal?.aborted) return finish(false, "任务已取消");
   if (!tool) return finish(false, `这台设备没有 ${toolName}，跑不了这张卡`, { error: `缺工具 ${toolName}` });
 
   const rendered = renderTemplate(card, params);
@@ -198,11 +208,13 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
     const challenge = approvalChallenge({ runId, stepId, actionDetail: action.detail, nonce, expiresAt });
     deps.emit({ type: "step.approval_required", runId, stepId, level, action, reason: decision.reason, expiresAt, challenge });
     const a = await deps.approvals.request({ runId, stepId, level, action, reason: decision.reason, challenge, expiresAt });
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
     if (a.allow && a.remember === "always" && level < 2) deps.policy.remember(action);
     verdict = a.allow ? "allow" : "deny";
     if (!a.allow) {
-      deps.emit({ type: "step.finished", runId, stepId, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error: "用户拒绝了这一步" });
-      return finish(false, "用户拒绝了", { error: "用户拒绝了这一步" });
+      const error = a.failure ?? "用户拒绝了这一步";
+      deps.emit({ type: "step.finished", runId, stepId, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error });
+      return finish(false, error, { error, status: a.failure ? "failed" : "denied" });
     }
   }
   if (verdict === "deny") {
@@ -210,6 +222,7 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
     return finish(false, `策略拒绝：${decision.reason}`, { error: decision.reason });
   }
 
+  if (deps.signal?.aborted) return finish(false, "任务已取消");
   const result = await deps.host.call(tool.name, args);
   deps.emit({ type: "step.finished", runId, stepId, ok: result.ok, ms: Date.now() - t0, channel: tool.channel, cost: { ...cost }, dataLeftDevice: false, output: result.output?.slice(0, 4000), error: result.error });
   deps.log?.({ t: "card.finished", runId, cardId: card.id, ok: result.ok, ms: Date.now() - t0, error: result.error });

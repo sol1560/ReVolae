@@ -39,13 +39,15 @@ const phone = await deriveKemKeyPair(seed("01"));
 const mac = await deriveKemKeyPair(seed("02"));
 const ekmPhone = seed("a1");
 const ekmMac = seed("b2");
+const noncePhone = seed("e5");
+const nonceMac = seed("f6");
 
 const frames = [
   controlFrame(messages[0], 1),
   controlFrame({ v: 1, id: "m8", type: "run.cancel", runId: "r1" }, 2),
 ];
-const phoneLink = await E2ELink.create({ selfId: phoneId, self: phone, peerId: macId, peerPublicKey: mac.publicKey, ekm: ekmPhone });
-const macLink = await E2ELink.create({ selfId: macId, self: mac, peerId: phoneId, peerPublicKey: phone.publicKey, ekm: ekmMac });
+const phoneLink = await E2ELink.create({ selfId: phoneId, self: phone, peerId: macId, peerPublicKey: mac.publicKey, ekm: ekmPhone, nonce: noncePhone });
+const macLink = await E2ELink.create({ selfId: macId, self: mac, peerId: phoneId, peerPublicKey: phone.publicKey, ekm: ekmMac, nonce: nonceMac });
 const phoneHandshake = phoneLink.handshake();
 const macHandshake = macLink.handshake();
 await macLink.openRelay(phoneHandshake);
@@ -59,9 +61,9 @@ const exporterCtx = await SealContext.create({ self: phone, peerPublicKey: mac.p
 const exported = await exporterCtx.export(new TextEncoder().encode("cuaremote-export-test"), 32);
 
 writeFileSync(join(tsDir, "hpke.json"), JSON.stringify({
-  note: "DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/ChaCha20-Poly1305，Auth 模式。密钥由 RFC 9180 DeriveKeyPair(ikm) 派生；enc 由固定 ekm 派生。aad = RelayEnvelope 头部字节（encrypted=1，body 为空时的编码）。",
-  phone: { id: phoneId, ikm: hex.to(seed("01")), pk: hex.to(phone.publicKey), sk: hex.to(phone.privateKey), ekm: hex.to(ekmPhone) },
-  mac: { id: macId, ikm: hex.to(seed("02")), pk: hex.to(mac.publicKey), sk: hex.to(mac.privateKey), ekm: hex.to(ekmMac) },
+  note: "链路v2；HPKE Auth模式。握手=[2][enc32][nonce32]，密文内=[接收方nonce32][Frame]。这些固定私钥与nonce仅供测试，生产必须随机。aad=RelayEnvelope头。",
+  phone: { id: phoneId, ikm: hex.to(seed("01")), pk: hex.to(phone.publicKey), sk: hex.to(phone.privateKey), ekm: hex.to(ekmPhone), nonce: hex.to(noncePhone) },
+  mac: { id: macId, ikm: hex.to(seed("02")), pk: hex.to(mac.publicKey), sk: hex.to(mac.privateKey), ekm: hex.to(ekmMac), nonce: hex.to(nonceMac) },
   infoPhoneToMac: hex.to(sessionInfo(phoneId, macId)),
   infoMacToPhone: hex.to(sessionInfo(macId, phoneId)),
   aadPhoneToMac: hex.to(relayHeader({ to: macId, from: phoneId, encrypted: true })),

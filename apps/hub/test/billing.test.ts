@@ -10,6 +10,19 @@ const SEP19 = Date.UTC(2026, 8, 19, 12) / 1000;
 const cost = (usd: number) => ({ inputTokens: 1000, outputTokens: 100, jevTokens: 0, usd });
 
 describe("Billing（本地账本）", () => {
+  test("未知价格不能按零元结算或扣除已知部分，核实后仍可结算", async () => {
+    const store = new HubStore(":memory:");
+    const billing = new Billing(store, { ledger: new LocalLedger(store, () => SEP19), freeRunsPerMonth: 0, now: () => SEP19 });
+    try {
+      store.addCredits("acc", 1000, SEP19);
+      expect((await billing.reserve("acc", "unknown")).ok).toBe(true);
+      await expect(billing.settle("acc", "unknown", { ...cost(0.2), unknownPrice: true })).rejects.toThrow("价格尚未核实");
+      expect(store.getCredits("acc")).toBe(1000);
+      expect(store.getRunBilling("unknown")!.settled).toBe(false);
+      expect((await billing.settle("acc", "unknown", cost(0.2))).credits).toBe(26);
+    } finally { store.close(); }
+  });
+
   test("免费次数按自然月算；用完后没余额就拒；充值后按成本 × 加成扣 credit；结算幂等", async () => {
     let now = SEP19;
     const store = new HubStore(":memory:");

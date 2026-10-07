@@ -9,12 +9,14 @@ import {
   DevicePlatform,
   DeviceStats,
   HistoryItem,
+  InstalledApp,
   Level,
   ModelEntry,
   PlanStep,
   PrecheckSource,
   PrivacySettings,
   PublicKeys,
+  RunStatus,
   Scope,
   Shortcut,
   SyncBlob,
@@ -83,11 +85,32 @@ export const AppLearnStop = msg("app.learn.stop", { bundleId: z.string() });
 export const AppCardRun = msg("app.card.run", { cardId: z.string(), params: z.record(z.string(), z.string()).default({}), deviceId: z.string().optional() });
 export const AppCardsGet = msg("app.cards.get", { bundleId: z.string().optional() });
 export const CapabilitiesGet = msg("capabilities.get", {});
+export const PermissionsGet = msg("permissions.get", {});
+/** Automation 按目标应用分别授权，未指定目标时不能汇总成已授权。 */
+export const PermissionsState = msg("permissions.state", {
+  ref: z.string().optional(), deviceId: z.string(),
+  permissions: z.object({ accessibility: z.boolean(), screenCapture: z.boolean(), automation: z.literal("unknown") }),
+});
+
+export const AppsList = msg("apps.list", {});
+export const AppsPage = msg("apps.page", { ref: z.string().optional(), apps: z.array(InstalledApp) });
+export const ShortcutsGet = msg("shortcuts.get", {});
+export const ShortcutPut = msg("shortcut.put", { shortcut: Shortcut });
+export const ShortcutDelete = msg("shortcut.delete", { shortcutId: z.string() });
+/** 必须恰好包含当前全部 ID，不允许用过时列表覆盖新增或已删除的指令。 */
+export const ShortcutsReorder = msg("shortcuts.reorder", { shortcutIds: z.array(z.string()) });
+export const HistoryGet = msg("history.get", { runId: z.string() });
+/** 卡片操作内容来自设备生成结果；手机只改展示信息，不能偷换脚本或降低等级。 */
+export const AppCardUpdate = msg("app.card.update", {
+  cardId: z.string(), name: z.string().min(1).max(200), hidden: z.boolean(),
+});
 
 // ─────────────────────────── 设备 → 手机 ───────────────────────────
 
 export const RunCreated = msg("run.created", {
   runId: z.string(),
+  /** 原始 intent.submit / shortcut.run / app.card.run 的消息 id。 */
+  requestId: z.string().optional(),
   deviceId: z.string(),
   intent: z.string(),
   provider: z.string(),
@@ -131,7 +154,10 @@ export const StepFinished = msg("step.finished", {
 });
 export const RunFinished = msg("run.finished", {
   runId: z.string(),
+  /** 做计划前失败时也能关联原始请求。 */
+  requestId: z.string().optional(),
   ok: z.boolean(),
+  status: RunStatus.optional(),
   summary: z.string(),
   cost: Cost,
   stepCount: z.number().int(),
@@ -158,8 +184,9 @@ export const MediaInfo = msg("media.info", {
   codec: z.enum(["jpeg", "h264"]),
   fps: z.number(),
 });
-export const Stats = msg("stats", { deviceId: z.string(), stats: DeviceStats });
+export const Stats = msg("stats", { ref: z.string().optional(), deviceId: z.string(), stats: DeviceStats });
 export const Capabilities = msg("capabilities", {
+  ref: z.string().optional(),
   deviceId: z.string(),
   platform: DevicePlatform,
   name: z.string(),
@@ -170,29 +197,40 @@ export const Capabilities = msg("capabilities", {
   daemonVersion: z.string(),
 });
 export const PrivacyState = msg("privacy.state", {
+  ref: z.string().optional(),
   deviceId: z.string(),
   settings: PrivacySettings,
   /** 「数据去哪了」：每类数据当前去向 */
   dataFlow: z.array(z.object({ data: z.string(), destination: z.string(), reason: z.string() })),
 });
-export const HistoryPage = msg("history.page", { items: z.array(HistoryItem), nextCursor: z.string().optional() });
+export const HistoryPage = msg("history.page", { ref: z.string().optional(), items: z.array(HistoryItem), nextCursor: z.string().optional() });
 export const AppLearnProgress = msg("app.learn.progress", {
+  ref: z.string().optional(),
   bundleId: z.string(),
   phase: z.enum(["sdef", "menu", "window", "shortcuts", "explore", "summarize", "done", "failed"]),
   found: z.number().int(),
   message: z.string().optional(),
 });
-export const AppCards = msg("app.cards", { cards: z.array(CapabilityCard) });
+export const AppCards = msg("app.cards", { ref: z.string().optional(), cards: z.array(CapabilityCard) });
 export const ModelsCatalog = msg("models.catalog", {
+  ref: z.string().optional(),
   models: z.array(ModelEntry),
   /** 大脑当前默认模型 id */
   defaultModel: z.string(),
   /** 这台大脑在哪跑：本地设备 / 云端 */
   brainLocation: BrainLocation,
 });
-export const ShortcutsList = msg("shortcuts.list", { shortcuts: z.array(Shortcut) });
+export const ShortcutsList = msg("shortcuts.list", { ref: z.string().optional(), shortcuts: z.array(Shortcut) });
 export const ErrorMsg = msg("error", { code: z.string(), message: z.string(), ref: z.string().optional() });
 export const Ack = msg("ack", { ref: z.string() });
+
+export const HistoryDetail = msg("history.detail", {
+  ref: z.string().optional(),
+  item: HistoryItem,
+  events: z.array(z.discriminatedUnion("type", [
+    RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished, TerminalSuggestion,
+  ])),
+});
 
 // ─────────────────────────── 端 ↔ hub（明文）───────────────────────────
 
@@ -320,6 +358,7 @@ export const PhoneToDevice = z.discriminatedUnion("type", [
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
   AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
+  AppsList, ShortcutsGet, ShortcutPut, ShortcutDelete, ShortcutsReorder, HistoryGet, AppCardUpdate, PermissionsGet,
 ]);
 export type PhoneToDevice = z.infer<typeof PhoneToDevice>;
 
@@ -327,6 +366,7 @@ export const DeviceToPhone = z.discriminatedUnion("type", [
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalAck, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, SyncKey, ErrorMsg, Ack,
+  AppsPage, HistoryDetail, PermissionsState,
 ]);
 export type DeviceToPhone = z.infer<typeof DeviceToPhone>;
 
@@ -356,6 +396,7 @@ export const AllMessages = {
   IntentSubmit, RunCancel, ApprovalDecision, TerminalOpen, TerminalResize, TerminalClose, TerminalAck,
   MediaSubscribe, MediaUnsubscribe, StatsGet, ShortcutRun, HistoryList, PrivacySet, PrivacyGet, ScopeSet,
   AppLearnStart, AppLearnStop, AppCardRun, AppCardsGet, CapabilitiesGet, ModelsList, SyncKey,
+  AppsList, AppsPage, ShortcutsGet, ShortcutPut, ShortcutDelete, ShortcutsReorder, HistoryGet, HistoryDetail, AppCardUpdate, PermissionsGet, PermissionsState,
   RunCreated, PlanUpdated, StepStarted, StepPrecheck, StepApprovalRequired, StepFinished, RunFinished,
   TerminalSuggestion, TerminalOpened, TerminalExit, TerminalBlockMsg, MediaInfo, Stats, Capabilities, PrivacyState,
   HistoryPage, AppLearnProgress, AppCards, ModelsCatalog, ShortcutsList, ErrorMsg, Ack,

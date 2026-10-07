@@ -20,7 +20,7 @@ object HpkeSuite {
     fun privateBytes(pair: AsymmetricCipherKeyPair): ByteArray = engine().serializePrivateKey(pair.private)
     fun sender(from: String, to: String, recipientPublic: AsymmetricKeyParameter, senderKeys: AsymmetricCipherKeyPair) = Sender(engine().setupAuthS(recipientPublic, info(from, to), senderKeys))
     fun recipient(from: String, to: String, encapsulation: ByteArray, recipientKeys: AsymmetricCipherKeyPair, senderPublic: AsymmetricKeyParameter) = Recipient(engine().setupAuthR(encapsulation, recipientKeys, info(from, to), senderPublic))
-    private fun info(from: String, to: String) = "cuaremote-v1|$from|$to".toByteArray()
+    private fun info(from: String, to: String) = "cuaremote-v2|$from|$to".toByteArray()
     class Sender internal constructor(private val context: HPKEContextWithEncapsulation) {
         val encapsulation: ByteArray get() = context.encapsulation
         fun seal(aad: ByteArray, plaintext: ByteArray): ByteArray = context.seal(aad, plaintext)

@@ -70,6 +70,22 @@ const card = (over: Partial<CapabilityCard>): CapabilityCard => ({
 });
 
 describe("learnApp（假设备 + mock 模型）", () => {
+  test("读取一阶段后取消：不继续采集、不发模型请求、不保存卡片", async () => {
+    const ctrl = new AbortController();
+    const { host, calls } = fakeHost();
+    const events: LearnEvent[] = [];
+    let modelCalls = 0;
+    const provider = new MockProvider();
+    provider.chat = async () => { modelCalls++; throw new Error("取消后不应调模型"); };
+    await expect(learnApp({ host, provider, signal: ctrl.signal, emit: (event) => {
+      events.push(event);
+      if (event.type === "app.learn.progress" && event.found > 0) ctrl.abort();
+    } }, { bundleId: "com.apple.Notes", explore: false })).rejects.toThrow();
+    expect(calls.map((c) => c.args.phase)).toEqual(["sdef"]);
+    expect(modelCalls).toBe(0);
+    expect(events.some((e) => e.type === "app.cards")).toBe(false);
+  });
+
   test("四阶段扒清单 → 卡片：id 带 bundleId 前缀、快捷指令出 shortcut 动作、删除类卡是 L2", async () => {
     const { host, calls } = fakeHost();
     const events: LearnEvent[] = [];
@@ -233,10 +249,40 @@ describe("runCard：每张卡都过策略引擎", () => {
     const { d, calls, events } = deps("balanced", { request: async () => ({ allow: false, remember: "once" }) });
     const out = await runCard(d, card({}), {});
     expect(out.ok).toBe(false);
+    expect(out.status).toBe("denied");
     expect(calls.filter((x) => x.tool === "applescript.run")).toHaveLength(0);
     const fin = events.find((e) => e.type === "step.finished") as Extract<LearnEvent, { type: "step.finished" }>;
     expect(fin.ok).toBe(false);
     expect(fin.error).toContain("拒绝");
+  });
+
+  test("卡片确认过期与工具执行中取消，不误报用户拒绝或成功", async () => {
+    const expired = deps("balanced", { request: async () => ({ allow: false, remember: "once", failure: "确认已过期" }) });
+    expect((await runCard(expired.d, card({}), {})).status).toBe("failed");
+    expect(expired.calls).toHaveLength(0);
+    expect(expired.events.at(-1)).toMatchObject({ status: "failed", summary: "确认已过期" });
+
+    const ctrl = new AbortController();
+    const cancelled = deps("handsoff");
+    cancelled.d.host.call = async () => {
+      ctrl.abort();
+      return { ok: true, output: "实际步骤完成，但整项已取消", ms: 1, attachments: [] };
+    };
+    expect(await runCard({ ...cancelled.d, signal: ctrl.signal }, card({}), {})).toMatchObject({ ok: false, status: "cancelled" });
+    expect(cancelled.events.at(-1)).toMatchObject({ ok: false, status: "cancelled", cancelled: true });
+  });
+
+  test("批准返回前已取消：即使返回allow也不执行，保留指定runId", async () => {
+    const ctrl = new AbortController();
+    const { d, calls, events } = deps("balanced", { request: async () => {
+      ctrl.abort();
+      return { allow: true, remember: "once" };
+    } });
+    const out = await runCard({ ...d, runId: "persisted-id", signal: ctrl.signal }, card({}), {});
+    expect(out.runId).toBe("persisted-id");
+    expect(out.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "run.finished", runId: "persisted-id", cancelled: true, ok: false });
   });
 
   test("放手档 L1 卡直接跑；但卡片自带 L2 时即使静态放行也必须确认", async () => {

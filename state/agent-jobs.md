@@ -1,5 +1,6 @@
 | id | kind | target | status | notes |
 |---|---|---|---|---|
+| T-01a0c39c-d19b-70ba-97a6-796b65826178 | runner sol-mac | 恢复原设计、接真实页面、Mac常驻与原生E2E | RUNNING | pages-14及native-foundation-18已收并核对；扩展页面待完整复跑。Keychain路径/清理和常驻实际进程测试通过；人工确认已实际拒绝，准备全新配对。已传TS foundation-15至18，18修复批准等待时关闭挂住。继续重命名/解绑、重连及local-12联测；开机自启/自动重连尚未完成。独占原生手写源码；orb负责TS/生成Swift/Android。临时凭据600保留供回归，完成后删。未推送或写Actions secrets |
 
 ## 2026-09-19 13:35 已创建的并行线程（orb）
 | 线程 | 范围 | 状态 |

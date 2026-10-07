@@ -4,11 +4,12 @@ import { E2ELink, decodeRelay, type KemKeyPair, type PublicKeys } from "@cuaremo
  * 一个端和多个对端之间的端到端链路（每个对端一条 E2ELink）。
  * 规则和 Swift/Kotlin 端一致：
  *   - 第一次给某个对端发东西前，先发我方握手帧
- *   - 收到对端握手帧：如果这条链路已经握过手，说明对端重连了 → 整条链路重建并重新发我方握手
+ *   - 同一在线会话只接收一次握手；收到离线通知或连接断开后由宿主 drop 再建立
  *   - 收到密文但还没收到对端握手 → 丢弃并报错（不缓存，让对端重发）
  */
 export class PeerLinks {
-  private links = new Map<string, { link: E2ELink; sentHandshake: boolean }>();
+  private links = new Map<string, Promise<{ link: E2ELink; sentHandshake: boolean }>>();
+  private sends = new Map<string, Promise<void>>();
 
   constructor(
     readonly selfId: string,
@@ -22,18 +23,25 @@ export class PeerLinks {
   }
 
   drop(peerId: string) {
+    void this.links.get(peerId)?.then((entry) => entry.link.close(), () => {});
     this.links.delete(peerId);
+    this.sends.delete(peerId);
   }
 
-  private async linkFor(peerId: string, fresh = false) {
-    let entry = this.links.get(peerId);
-    if (entry && !fresh) return entry;
+  close() {
+    for (const peerId of this.links.keys()) this.drop(peerId);
+  }
+
+  private async linkFor(peerId: string) {
+    const entry = this.links.get(peerId);
+    if (entry) return entry;
     const keys = this.peerKeys(peerId);
     if (!keys) throw new Error(`不知道 ${peerId} 的公钥（还没配对或 hub 没发 peer.keys）`);
-    const link = await E2ELink.create({ selfId: this.selfId, self: this.self, peerId, peerPublicKey: new Uint8Array(Buffer.from(keys.kem, "base64")) });
-    entry = { link, sentHandshake: false };
-    this.links.set(peerId, entry);
-    return entry;
+    const creating = E2ELink.create({ selfId: this.selfId, self: this.self, peerId, peerPublicKey: new Uint8Array(Buffer.from(keys.kem, "base64")) })
+      .then((link) => ({ link, sentHandshake: false }));
+    this.links.set(peerId, creating);
+    try { return await creating; }
+    catch (e) { if (this.links.get(peerId) === creating) this.links.delete(peerId); throw e; }
   }
 
   private async ensureHandshake(entry: { link: E2ELink; sentHandshake: boolean }) {
@@ -43,10 +51,14 @@ export class PeerLinks {
   }
 
   /** 发一帧明文 Frame 给对端（自动补握手） */
-  async send(peerId: string, frame: Uint8Array) {
-    const entry = await this.linkFor(peerId);
-    await this.ensureHandshake(entry);
-    await this.sendRelay(await entry.link.sealFrame(frame));
+  send(peerId: string, frame: Uint8Array): Promise<void> {
+    const previous = this.sends.get(peerId) ?? Promise.resolve();
+    const result = Promise.all([previous, this.linkFor(peerId)]).then(async ([, entry]) => {
+      await this.ensureHandshake(entry);
+      await this.sendRelay(await entry.link.sealFrame(frame));
+    });
+    this.sends.set(peerId, result.catch(() => {}));
+    return result;
   }
 
   /** 收到一个 RelayEnvelope；返回 {from, frame} 或 null（握手帧） */
@@ -54,13 +66,13 @@ export class PeerLinks {
     const env = decodeRelay(bytes);
     if (env.to !== this.selfId) throw new Error(`信封不是给我的：to=${env.to}`);
     if (!env.encrypted) {
-      // 对端握手：已有链路则视为对端重连，重建
-      const entry = await this.linkFor(env.from, this.links.get(env.from)?.link.ready ?? false);
+      // 重复握手由 E2ELink 拒绝；不得互相重建导致无限交换握手。
+      const entry = await this.linkFor(env.from);
       await entry.link.openRelay(bytes);
       await this.ensureHandshake(entry);
       return null;
     }
-    const entry = this.links.get(env.from);
+    const entry = await this.links.get(env.from);
     if (!entry || !entry.link.ready) throw new Error(`${env.from} 还没握手就发了密文`);
     const frame = await entry.link.openRelay(bytes);
     return frame ? { from: env.from, frame } : null;

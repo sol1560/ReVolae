@@ -864,9 +864,1181 @@
         },
         "type": {
           "type": "string",
+          "const": "apps.list"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "apps.page"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "apps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bundleId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "running": {
+                "type": "boolean"
+              },
+              "learned": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bundleId",
+              "name",
+              "running",
+              "learned"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "apps"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "shortcuts.get"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "shortcut.put"
+        },
+        "shortcut": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "runIn": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "terminal",
+                "ssh"
+              ]
+            },
+            "sshHostId": {
+              "type": "string"
+            },
+            "level": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "const": 0
+                },
+                {
+                  "type": "number",
+                  "const": 1
+                },
+                {
+                  "type": "number",
+                  "const": 2
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "body",
+            "runIn",
+            "level"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "shortcut"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "shortcut.delete"
+        },
+        "shortcutId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "shortcutId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "shortcuts.reorder"
+        },
+        "shortcutIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "shortcutIds"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "history.get"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "runId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "history.detail"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "item": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "type": "string"
+            },
+            "deviceId": {
+              "type": "string"
+            },
+            "intent": {
+              "type": "string"
+            },
+            "startedAt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "finishedAt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "denied",
+                "cancelled"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "cost": {
+              "type": "object",
+              "properties": {
+                "inputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "outputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "jevTokens": {
+                  "default": 0,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unknownPrice": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "inputTokens",
+                "outputTokens",
+                "jevTokens",
+                "usd"
+              ],
+              "additionalProperties": false
+            },
+            "stepCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "runId",
+            "deviceId",
+            "intent",
+            "startedAt"
+          ],
+          "additionalProperties": false
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "run.created"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "plan": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "shell",
+                            "applescript",
+                            "jxa",
+                            "shortcuts",
+                            "fs",
+                            "gui",
+                            "app",
+                            "ipad",
+                            "android",
+                            "terminal"
+                          ]
+                        },
+                        "staticLevel": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "const": 0
+                            },
+                            {
+                              "type": "number",
+                              "const": 1
+                            },
+                            {
+                              "type": "number",
+                              "const": 2
+                            }
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "running",
+                            "awaiting_approval",
+                            "done",
+                            "failed",
+                            "skipped",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "deviceId",
+                  "intent",
+                  "provider",
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "plan.updated"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "plan": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "shell",
+                            "applescript",
+                            "jxa",
+                            "shortcuts",
+                            "fs",
+                            "gui",
+                            "app",
+                            "ipad",
+                            "android",
+                            "terminal"
+                          ]
+                        },
+                        "staticLevel": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "const": 0
+                            },
+                            {
+                              "type": "number",
+                              "const": 1
+                            },
+                            {
+                              "type": "number",
+                              "const": 2
+                            }
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "running",
+                            "awaiting_approval",
+                            "done",
+                            "failed",
+                            "skipped",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "step.started"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "shell",
+                      "applescript",
+                      "jxa",
+                      "shortcuts",
+                      "fs",
+                      "gui",
+                      "app",
+                      "ipad",
+                      "android",
+                      "terminal"
+                    ]
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "stepId",
+                  "title"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "step.precheck"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  },
+                  "staticLevel": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 0
+                      },
+                      {
+                        "type": "number",
+                        "const": 1
+                      },
+                      {
+                        "type": "number",
+                        "const": 2
+                      }
+                    ]
+                  },
+                  "level": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 0
+                      },
+                      {
+                        "type": "number",
+                        "const": 1
+                      },
+                      {
+                        "type": "number",
+                        "const": 2
+                      }
+                    ]
+                  },
+                  "intentMatch": {
+                    "type": "boolean"
+                  },
+                  "risk": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "jevMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "confirm",
+                      "deny"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "jev",
+                      "static",
+                      "cache",
+                      "fallback"
+                    ]
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "stepId",
+                  "staticLevel",
+                  "level",
+                  "verdict",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "step.approval_required"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  },
+                  "level": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 0
+                      },
+                      {
+                        "type": "number",
+                        "const": 1
+                      },
+                      {
+                        "type": "number",
+                        "const": 2
+                      }
+                    ]
+                  },
+                  "action": {
+                    "type": "object",
+                    "properties": {
+                      "channel": {
+                        "type": "string",
+                        "enum": [
+                          "shell",
+                          "applescript",
+                          "jxa",
+                          "shortcuts",
+                          "fs",
+                          "gui",
+                          "app",
+                          "ipad",
+                          "android",
+                          "terminal"
+                        ]
+                      },
+                      "summary": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": "string"
+                      },
+                      "targetApp": {
+                        "type": "string"
+                      },
+                      "targetPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "channel",
+                      "summary",
+                      "detail"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "challenge": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "stepId",
+                  "level",
+                  "action",
+                  "reason",
+                  "expiresAt",
+                  "challenge"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "step.finished"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "stepId": {
+                    "type": "string"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "ms": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "shell",
+                      "applescript",
+                      "jxa",
+                      "shortcuts",
+                      "fs",
+                      "gui",
+                      "app",
+                      "ipad",
+                      "android",
+                      "terminal"
+                    ]
+                  },
+                  "cost": {
+                    "type": "object",
+                    "properties": {
+                      "inputTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "outputTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "jevTokens": {
+                        "default": 0,
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "usd": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "unknownPrice": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "inputTokens",
+                      "outputTokens",
+                      "jevTokens",
+                      "usd"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "dataLeftDevice": {
+                    "type": "boolean"
+                  },
+                  "output": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "stepId",
+                  "ok",
+                  "ms",
+                  "dataLeftDevice"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "run.finished"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "succeeded",
+                      "failed",
+                      "denied",
+                      "cancelled"
+                    ]
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "cost": {
+                    "type": "object",
+                    "properties": {
+                      "inputTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "outputTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "jevTokens": {
+                        "default": 0,
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "usd": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "unknownPrice": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "inputTokens",
+                      "outputTokens",
+                      "jevTokens",
+                      "usd"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "stepCount": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "cancelled": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "ok",
+                  "summary",
+                  "cost",
+                  "stepCount",
+                  "cancelled"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "terminal.suggestion"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "explanation": {
+                    "type": "string"
+                  },
+                  "level": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 0
+                      },
+                      {
+                        "type": "number",
+                        "const": 1
+                      },
+                      {
+                        "type": "number",
+                        "const": 2
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "type",
+                  "runId",
+                  "command",
+                  "explanation",
+                  "level"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "item",
+        "events"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "app.card.update"
+        },
+        "cardId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "cardId",
+        "name",
+        "hidden"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "permissions.get"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "const": "permissions.state"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "permissions": {
+          "type": "object",
+          "properties": {
+            "accessibility": {
+              "type": "boolean"
+            },
+            "screenCapture": {
+              "type": "boolean"
+            },
+            "automation": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "accessibility",
+            "screenCapture",
+            "automation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "deviceId",
+        "permissions"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
           "const": "run.created"
         },
         "runId": {
+          "type": "string"
+        },
+        "requestId": {
           "type": "string"
         },
         "deviceId": {
@@ -1357,6 +2529,9 @@
             "usd": {
               "type": "number",
               "minimum": 0
+            },
+            "unknownPrice": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1406,8 +2581,20 @@
         "runId": {
           "type": "string"
         },
+        "requestId": {
+          "type": "string"
+        },
         "ok": {
           "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed",
+            "denied",
+            "cancelled"
+          ]
         },
         "summary": {
           "type": "string"
@@ -1434,6 +2621,9 @@
             "usd": {
               "type": "number",
               "minimum": 0
+            },
+            "unknownPrice": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1743,6 +2933,9 @@
           "type": "string",
           "const": "stats"
         },
+        "ref": {
+          "type": "string"
+        },
         "deviceId": {
           "type": "string"
         },
@@ -1768,6 +2961,12 @@
               "type": "number"
             },
             "memUsedMB": {
+              "type": "number"
+            },
+            "memTotalMB": {
+              "type": "number"
+            },
+            "diskFreeGB": {
               "type": "number"
             },
             "uptimeSec": {
@@ -1802,6 +3001,9 @@
         "type": {
           "type": "string",
           "const": "capabilities"
+        },
+        "ref": {
+          "type": "string"
         },
         "deviceId": {
           "type": "string"
@@ -1967,6 +3169,9 @@
           "type": "string",
           "const": "privacy.state"
         },
+        "ref": {
+          "type": "string"
+        },
         "deviceId": {
           "type": "string"
         },
@@ -2095,6 +3300,9 @@
           "type": "string",
           "const": "history.page"
         },
+        "ref": {
+          "type": "string"
+        },
         "items": {
           "type": "array",
           "items": {
@@ -2122,6 +3330,15 @@
               "ok": {
                 "type": "boolean"
               },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "denied",
+                  "cancelled"
+                ]
+              },
               "summary": {
                 "type": "string"
               },
@@ -2147,6 +3364,9 @@
                   "usd": {
                     "type": "number",
                     "minimum": 0
+                  },
+                  "unknownPrice": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -2198,6 +3418,9 @@
           "type": "string",
           "const": "app.learn.progress"
         },
+        "ref": {
+          "type": "string"
+        },
         "bundleId": {
           "type": "string"
         },
@@ -2246,6 +3469,9 @@
         "type": {
           "type": "string",
           "const": "app.cards"
+        },
+        "ref": {
+          "type": "string"
         },
         "cards": {
           "type": "array",
@@ -2437,6 +3663,9 @@
           "type": "string",
           "const": "models.catalog"
         },
+        "ref": {
+          "type": "string"
+        },
         "models": {
           "type": "array",
           "items": {
@@ -2473,6 +3702,9 @@
               "priceOut": {
                 "type": "number",
                 "minimum": 0
+              },
+              "unknownPrice": {
+                "type": "boolean"
               },
               "available": {
                 "type": "boolean"
@@ -2535,6 +3767,9 @@
         "type": {
           "type": "string",
           "const": "shortcuts.list"
+        },
+        "ref": {
+          "type": "string"
         },
         "shortcuts": {
           "type": "array",
@@ -3025,6 +4260,9 @@
             "usd": {
               "type": "number",
               "minimum": 0
+            },
+            "unknownPrice": {
+              "type": "boolean"
             }
           },
           "required": [

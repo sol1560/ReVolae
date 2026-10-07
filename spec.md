@@ -27,7 +27,7 @@ packages/jev-eval/     基准集 + 评测脚本（Python/uv）
 apps/hub/              Bun：WS 中继、配对撮合、设备认证、推送、计量、云端大脑宿主、JOC 计费对接
 apps/poc-web/          M0 手机网页
 apps/daemon-macos/     Swift：CuaRemote.app（LSUIElement 常驻、TCC、WS+E2E、PTY、SCStream、Keychain、spawn brain 与 cua-driver）+ cuaremote CLI
-apps/ios/              SwiftUI iOS/iPadOS app（Liquid Glass；设备/应用/终端/活动/我的；SSH 客户端；Face ID 审批；语音；iPad 被控扩展）
+apps/ios/              SwiftUI iOS/iPadOS app（按 docs/design 自定义界面；设备/应用/终端/活动/我的；SSH 客户端；Face ID 审批；语音；iPad 被控扩展）
 apps/android-daemon/   Kotlin：AccessibilityService 被控端
 apps/android/          Kotlin Compose：Android 控制端
 firmware/dongle/       iPad dongle 固件（RP2040 CircuitPython，HID + USB 网络 + HTTP）与校准
@@ -52,7 +52,7 @@ docs/
 - F1.2 端到端加密：TS 侧 HPKE（X25519 + ChaChaPoly，`@noble` 系或 WebCrypto）与 Swift CryptoKit HPKE 互通向量测试；审批签名 P-256 验签。
 - F1.3 云端大脑模式：brain 在 hub 内运行，tools.call 经中继到 daemon；本地/云端同一份代码。
 - F1.4 `apps/daemon-macos`（runner）：Swift Package + Xcode 工程；LSUIElement + SMAppService 常驻；`cuaremote setup / pair / status` CLI；WS 出站 + HPKE；spawn brain（bun 二进制）与 cua-driver（EmbeddedCuaDriverHost 或 `cua-driver mcp --direct`）；PTY（forkpty）+ 背压；SCStream 1fps JPEG 缩略图；IOKit 电池/网络/运行中应用；Keychain 存密钥；作用域白名单 → cua-driver bounded 能力清单；操作日志本地全量。
-- F1.5 `apps/ios`（runner）：SwiftUI，iOS 26 Liquid Glass 系统件（TabView + tabBarMinimizeBehavior + tabViewBottomAccessory「让 Mac 做一件事」、NavigationStack、glassEffect）；tab 设备 / 应用 / 终端 / 活动 / 我的；扫码配对；意图输入 + 步骤时间线；审批卡片（显示具体命令 / 脚本 / 元素，仅这次 / 以后自动，Face ID = Secure Enclave 签名）；设备详情（缩略图、电池、网络、应用）；「我的 → 隐私」数据去哪了页 + 三档预设 + 逐项开关 + 模型档位标签（Fable 5.1 标不支持 ZDR）；操作历史；自定义快捷指令。
+- F1.5 `apps/ios`（runner）：SwiftUI，按 `docs/design/index.html` 还原页面层级、卡片、分组列表、输入区和按钮，以及绿色成功、黄色警告、红色危险、蓝色链接与 GUI 标签。顶部和底部导航均使用真正原生组件；底部左侧为五栏组，最右侧保留独立圆形「让设备做一件事」按钮，两块背景明显分开，不移入顶部工具栏或变成第六页签。原生底栏和独立按钮必须同时保留，不能为满足其中一项擅自丢弃另一项，也不能用手绘背景冒充原生效果。保留各栏导航、搜索及滚动状态，详情隐藏底栏；页面不套默认 Form，系统键盘和认证保留（2026-09-22 用户最新修订）；tab 设备 / 应用 / 终端 / 活动 / 我的；扫码配对；意图输入 + 步骤时间线；审批卡片（显示具体命令 / 脚本 / 元素，仅这次 / 以后自动，Face ID = Secure Enclave 签名）；设备详情（缩略图、电池、网络、应用）；「我的 → 隐私」数据去哪了页 + 三档预设 + 逐项开关 + 模型档位标签（Fable 5.1 标不支持 ZDR）；操作历史；自定义快捷指令。
 - F1.6 学习应用：daemon 侧 sdef / 菜单 AX / 主窗口 AX / Shortcuts 动作探索 → 能力清单 → 模型总结成能力卡片（6 种控件）→ 手机数据驱动 SwiftUI 渲染；每次执行过 Jev。
 - F1.7 终端：daemon PTY 终端（开终端 = L2）；iOS SwiftTerm 渲染 + 扩展键盘条；AI「terminal 模式」propose_command；SSH 客户端（Citadel）：主机列表、ed25519 生成/导入、Keychain/Secure Enclave、一键连接、多标签、Snippets chips。
 - F1.8 开源材料：README、架构文档、贡献指南、CLA、协议文档、安全模型文档。

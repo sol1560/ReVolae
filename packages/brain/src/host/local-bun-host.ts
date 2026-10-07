@@ -1,9 +1,10 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve, join, relative, isAbsolute } from "node:path";
-import type { Scope, ToolDescriptor } from "@cuaremote/protocol";
+import { AppInventory, type CapabilityCard, type Scope, type ToolDescriptor } from "@cuaremote/protocol";
 import type { Host, ToolResult } from "./types.js";
 import { TERMINAL_BLOCKS_DESCRIPTOR, type TerminalManager } from "../terminal/manager.js";
+import { nativeHelper } from "./native-helper.js";
 
 const isMac = process.platform === "darwin";
 /** 单引号包起来给 sh 用 */
@@ -75,6 +76,8 @@ export interface LocalHostOptions {
   loginShell?: boolean;
   /** 有远程终端会话时挂上，工具表多一个 terminal.blocks */
   terminals?: TerminalManager;
+  /** 只读设备已保存的卡片，不接受模型传入脚本覆盖。 */
+  getCard?: (id: string) => CapabilityCard | undefined;
 }
 
 /** M0：大脑和被控设备是同一台机器时的宿主 */
@@ -83,10 +86,12 @@ export class LocalBunHost implements Host {
   private readonly shell: string;
   private readonly loginShell: boolean;
   private readonly terminals?: TerminalManager;
+  private readonly getCard?: LocalHostOptions["getCard"];
 
   constructor(opts: LocalHostOptions = {}) {
     this.loginShell = opts.loginShell ?? true;
     this.terminals = opts.terminals;
+    this.getCard = opts.getCard;
     this.scope = {
       allowedDirs: opts.scope?.allowedDirs ?? [homedir()],
       allowedApps: opts.scope?.allowedApps ?? [],
@@ -98,6 +103,8 @@ export class LocalBunHost implements Host {
   async listTools() {
     const base = isMac ? LOCAL_TOOLS : LOCAL_TOOLS.filter((t) => !["applescript.run", "jxa.run", "shortcuts.run", "shortcuts.list"].includes(t.name));
     const tools = [...base, ...(this.adb() ? [ADB_TOOL] : []), ...(this.terminals ? [TERMINAL_BLOCKS_DESCRIPTOR] : [])];
+    if (process.env.CUAREMOTE_NATIVE_HELPER) tools.push({ name: "app.inventory", description: "只读采集指定应用的脚本、菜单、窗口或快捷指令能力。", channel: "app", staticLevel: 0, costClass: 0, dataLeavesDevice: true, inputSchema: { type: "object", properties: { bundleId: { type: "string" }, phase: { type: "string", enum: ["sdef", "menu", "window", "shortcuts"] } }, required: ["bundleId", "phase"] } });
+    if (this.getCard) tools.push({ name: "app.card.get", description: "读取已保存的应用操作卡片。", channel: "app", staticLevel: 0, costClass: 0, dataLeavesDevice: true, inputSchema: { type: "object", properties: { cardId: { type: "string" } }, required: ["cardId"] } });
     return { tools, scope: this.scope };
   }
 
@@ -110,6 +117,19 @@ export class LocalBunHost implements Host {
     const done = (r: Omit<ToolResult, "ms" | "attachments"> & Partial<Pick<ToolResult, "attachments">>): ToolResult => ({ attachments: [], ...r, ms: Date.now() - t0 });
     try {
       switch (tool) {
+        case "app.inventory": {
+          const phase = String(args.phase);
+          if (!["sdef", "menu", "window", "shortcuts"].includes(phase)) return done({ ok: false, error: "不支持的只读采集阶段" });
+          const bundleId = String(args.bundleId);
+          if (this.scope.allowedApps.length && !this.scope.allowedApps.includes(bundleId)) return done({ ok: false, error: "应用不在允许范围内" });
+          const inventory = await nativeHelper(["inventory", bundleId, phase], AppInventory, timeoutMs);
+          if (inventory.bundleId !== bundleId || inventory.phase !== phase) return done({ ok: false, error: "应用采集结果与请求不匹配" });
+          return done({ ok: true, output: JSON.stringify(inventory) });
+        }
+        case "app.card.get": {
+          const card = this.getCard?.(String(args.cardId));
+          return card ? done({ ok: true, output: JSON.stringify(card) }) : done({ ok: false, error: "找不到这张卡片" });
+        }
         case "shell.run": {
           const cmd = String(args.cmd ?? "");
           const denied = this.scope.deniedCommands.find((d) => cmd.includes(d));

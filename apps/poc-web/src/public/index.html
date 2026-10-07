@@ -203,7 +203,7 @@
         </div>
       </li>`).join('');
     const sug = run.suggestion ? `<div class="summary"><div class="muted">建议命令（不会自动执行）<span class="badge L${run.suggestion.level}">L${run.suggestion.level}</span></div><pre>${esc(run.suggestion.command)}</pre><div class="muted">${esc(run.suggestion.explanation)}</div></div>` : '';
-    const fin = run.finished ? `<div class="summary ${run.finished.ok ? 'ok' : 'bad'}">${run.finished.cancelled ? '已取消' : run.finished.ok ? '完成' : '失败'}：${esc(run.finished.summary)}</div><div class="cost">$${run.finished.cost.usd.toFixed(4)} · 输入 ${run.finished.cost.inputTokens} / 输出 ${run.finished.cost.outputTokens} / Jev ${run.finished.cost.jevTokens} tokens · ${run.finished.stepCount} 步</div>` : '';
+    const fin = run.finished ? `<div class="summary ${run.finished.ok ? 'ok' : 'bad'}">${run.finished.cancelled ? '已取消' : run.finished.ok ? '完成' : '失败'}：${esc(run.finished.summary)}</div><div class="cost">${run.finished.cost.unknownPrice ? '费用未知（模型价格未核实）' : '$' + run.finished.cost.usd.toFixed(4)} · 输入 ${run.finished.cost.inputTokens} / 输出 ${run.finished.cost.outputTokens} / Jev ${run.finished.cost.jevTokens} tokens · ${run.finished.stepCount} 步</div>` : '';
     run.el.innerHTML = `<div class="run-head"><b>${esc(run.intent)}</b><span class="muted">${esc(run.provider)}</span></div><ol class="steps">${stepsHtml}</ol>${sug}${fin}`;
   }
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }

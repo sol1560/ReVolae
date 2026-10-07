@@ -29,7 +29,7 @@ const camel = (s: string) => {
   const p = pascal(s);
   return p.charAt(0).toLowerCase() + p.slice(1);
 };
-const swiftReserved = new Set(["type", "default", "operator", "protocol", "class", "struct", "enum", "func", "var", "let", "in", "for", "is", "as", "self", "Self", "true", "false", "nil", "import", "return", "case", "switch"]);
+const swiftReserved = new Set(["type", "default", "operator", "protocol", "class", "struct", "enum", "func", "var", "let", "in", "for", "is", "as", "self", "Self", "true", "false", "nil", "import", "return", "case", "switch", "static"]);
 const ident = (s: string) => (swiftReserved.has(s) ? `\`${s}\`` : s);
 
 function swiftType(schema: any, hint: string): { type: string; optional: boolean } {

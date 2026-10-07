@@ -1,12 +1,12 @@
 /**
  * 端到端加密：HPKE（RFC 9180）Auth 模式
  *   DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305
- *   info = "cuaremote-v1|" + from + "|" + to
+ *   info = "cuaremote-v2|" + from + "|" + to
  *   每帧 seal(aad = RelayEnvelope 头部字节, pt = Frame 字节)
  *
  * 每个方向一个上下文：A→B 用 A 发起的 sender ctx，B→A 用 B 发起的另一个 sender ctx。
- * 会话建立：发起方先发一个 encrypted=0 的 RelayEnvelope，body = enc（32 字节）；
- * 对端收到后建 recipient ctx，之后该方向所有 RelayEnvelope 都是 encrypted=1。
+ * 双方先交换 encrypted=0 的 RelayEnvelope，body=[版本2][enc32][本次随机nonce32]。
+ * 密文内包含接收方本次nonce，旧握手连同旧密文不能在重启后重放。旧版本不降级。
  *
  * Swift 侧对应 CryptoKit `HPKE.Sender(recipientKey:ciphersuite:info:authenticatedBy:)` /
  * `HPKE.Recipient(privateKey:ciphersuite:info:encapsulatedKey:authenticatedBy:)`，
@@ -17,7 +17,7 @@ import { Chacha20Poly1305 } from "@hpke/chacha20poly1305";
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
 import { encodeRelay, decodeRelay, type RelayEnvelope } from "./frame.js";
 
-export const HPKE_PROTOCOL_TAG = "cuaremote-v1";
+export const HPKE_PROTOCOL_TAG = "cuaremote-v2";
 export const KEM_PUBLIC_KEY_BYTES = 32;
 export const KEM_ENC_BYTES = 32;
 export const AEAD_TAG_BYTES = 16;
@@ -95,40 +95,73 @@ export class OpenContext {
  */
 export class E2ELink {
   private opener: OpenContext | null = null;
-  private constructor(readonly selfId: string, readonly peerId: string, private readonly self: KemKeyPair, private readonly peerPublicKey: Uint8Array, private readonly sealer: SealContext) {}
+  private peerNonce?: Uint8Array;
+  private closed = false;
+  private sends = Promise.resolve();
+  private readonly waiters = new Set<(error?: Error) => void>();
+  private constructor(readonly selfId: string, readonly peerId: string, private readonly self: KemKeyPair, private readonly peerPublicKey: Uint8Array, private readonly sealer: SealContext, private readonly nonce: Uint8Array) {}
 
-  static async create(p: { selfId: string; self: KemKeyPair; peerId: string; peerPublicKey: Uint8Array; ekm?: Uint8Array }): Promise<E2ELink> {
+  static async create(p: { selfId: string; self: KemKeyPair; peerId: string; peerPublicKey: Uint8Array; ekm?: Uint8Array; /** 固定值仅用于互通测试 */ nonce?: Uint8Array }): Promise<E2ELink> {
     const sealer = await SealContext.create({ self: p.self, peerPublicKey: p.peerPublicKey, from: p.selfId, to: p.peerId, ekm: p.ekm });
-    return new E2ELink(p.selfId, p.peerId, p.self, p.peerPublicKey, sealer);
+    const nonce = p.nonce?.slice() ?? crypto.getRandomValues(new Uint8Array(32));
+    if (nonce.length !== 32) throw new Error("连接随机值必须为32字节");
+    return new E2ELink(p.selfId, p.peerId, p.self, p.peerPublicKey, sealer, nonce);
   }
 
   /** 我方发送方向的握手帧（对端拿到 enc 才能解我发的密文） */
   handshake(): Uint8Array {
-    return encodeRelay({ to: this.peerId, from: this.selfId, encrypted: false, body: this.sealer.enc });
+    return encodeRelay({ to: this.peerId, from: this.selfId, encrypted: false, body: concat(new Uint8Array([2]), concat(this.sealer.enc, this.nonce)) });
   }
 
   get ready() {
-    return this.opener !== null;
+    return !this.closed && this.opener !== null;
   }
 
-  async sealFrame(frame: Uint8Array): Promise<Uint8Array> {
-    const header = relayHeader({ to: this.peerId, from: this.selfId, encrypted: true });
-    const ct = await this.sealer.seal(header, frame);
-    return concat(header, ct);
+  close() {
+    this.closed = true;
+    for (const waiter of this.waiters) waiter(new Error("加密连接已关闭"));
+  }
+
+  private async waitReady() {
+    if (this.closed) throw new Error("加密连接已关闭");
+    if (this.ready) return;
+    await new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => { clearTimeout(timer); this.waiters.delete(finish); error ? reject(error) : resolve(); };
+      const timer = setTimeout(() => finish(new Error("等待对端加密握手超时")), 10_000);
+      this.waiters.add(finish);
+    });
+  }
+
+  sealFrame(frame: Uint8Array): Promise<Uint8Array> {
+    const result = this.sends.then(async () => {
+      await this.waitReady();
+      if (this.closed) throw new Error("加密连接已关闭");
+      const header = relayHeader({ to: this.peerId, from: this.selfId, encrypted: true });
+      const ct = await this.sealer.seal(header, concat(this.peerNonce!, frame));
+      return concat(header, ct);
+    });
+    this.sends = result.then(() => {}, () => {});
+    return result;
   }
 
   /** 返回解密后的 Frame 字节；如果是对端的握手帧，建好 opener 并返回 null */
   async openRelay(bytes: Uint8Array): Promise<Uint8Array | null> {
+    if (this.closed) throw new Error("加密连接已关闭");
     const env = decodeRelay(bytes);
     if (env.to !== this.selfId || env.from !== this.peerId) throw new Error(`信封路由不对：${env.from}→${env.to}，本链路是 ${this.peerId}→${this.selfId}`);
     if (!env.encrypted) {
       if (this.opener) throw new Error("对端重复握手（会话中途换 enc 不允许）");
-      this.opener = await OpenContext.create({ self: this.self, peerPublicKey: this.peerPublicKey, enc: env.body, from: this.peerId, to: this.selfId });
+      if (env.body.length !== 65 || env.body[0] !== 2) throw new Error("加密握手版本不匹配，请升级两端应用");
+      this.opener = await OpenContext.create({ self: this.self, peerPublicKey: this.peerPublicKey, enc: env.body.subarray(1, 33), from: this.peerId, to: this.selfId });
+      this.peerNonce = env.body.slice(33);
+      for (const waiter of this.waiters) waiter();
       return null;
     }
     if (!this.opener) throw new Error("还没收到对端握手就来了密文");
     const header = bytes.subarray(0, bytes.byteLength - env.body.byteLength);
-    return this.opener.open(header, env.body);
+    const plaintext = await this.opener.open(header, env.body);
+    if (plaintext.length < 32 || !this.nonce.every((byte, i) => plaintext[i] === byte)) throw new Error("旧连接密文或连接随机值不匹配");
+    return plaintext.subarray(32);
   }
 }
 

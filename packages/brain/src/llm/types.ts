@@ -54,6 +54,7 @@ export interface ModelInfo {
   /** 每百万 token 美元 */
   priceIn: number;
   priceOut: number;
+  unknownPrice?: boolean;
 }
 
 export interface Provider {

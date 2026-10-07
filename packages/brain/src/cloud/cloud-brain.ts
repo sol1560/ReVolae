@@ -294,12 +294,12 @@ export class CloudBrain {
           (x): x is Extract<AnyMessage, { type: "approval.decision" }> => x.type === "approval.decision" && x.runId === req.runId && x.stepId === req.stepId,
           (req.expiresAt - this.now()) * 1000,
         );
-        if (!d) return { allow: false, remember: "once" };
+        if (!d) return { allow: false, remember: "once", failure: "未收到有效确认，未执行" };
         const v = this.verifierFor(phoneId).verify(d);
         if (!v.ok) {
           this.o.log?.({ t: "approval_rejected", runId: req.runId, stepId: req.stepId, reason: v.reason });
           await this.sendTo(phoneId, { type: "error", code: `approval_${v.reason}`, message: v.message, ref: d.id });
-          return { allow: false, remember: "once" };
+          return { allow: false, remember: "once", failure: v.message };
         }
         return { allow: d.allow, remember: d.remember };
       },

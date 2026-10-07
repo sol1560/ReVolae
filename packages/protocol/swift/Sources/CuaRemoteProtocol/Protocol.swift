@@ -334,12 +334,14 @@ public struct Cost: Codable, Sendable {
     public var outputTokens: Int
     public var jevTokens: Int?
     public var usd: Double
+    public var unknownPrice: Bool?
 
-    public init(inputTokens: Int, outputTokens: Int, jevTokens: Int? = nil, usd: Double) {
+    public init(inputTokens: Int, outputTokens: Int, jevTokens: Int? = nil, usd: Double, unknownPrice: Bool? = nil) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.jevTokens = jevTokens
         self.usd = usd
+        self.unknownPrice = unknownPrice
     }
 
     enum CodingKeys: String, CodingKey {
@@ -347,6 +349,7 @@ public struct Cost: Codable, Sendable {
         case outputTokens
         case jevTokens
         case usd
+        case unknownPrice
     }
 }
 
@@ -365,15 +368,19 @@ public struct DeviceStats: Codable, Sendable {
     public var runningApps: [String]
     public var cpuPercent: Double?
     public var memUsedMB: Double?
+    public var memTotalMB: Double?
+    public var diskFreeGB: Double?
     public var uptimeSec: Double?
 
-    public init(batteryPercent: Double? = nil, charging: Bool? = nil, network: String? = nil, runningApps: [String], cpuPercent: Double? = nil, memUsedMB: Double? = nil, uptimeSec: Double? = nil) {
+    public init(batteryPercent: Double? = nil, charging: Bool? = nil, network: String? = nil, runningApps: [String], cpuPercent: Double? = nil, memUsedMB: Double? = nil, memTotalMB: Double? = nil, diskFreeGB: Double? = nil, uptimeSec: Double? = nil) {
         self.batteryPercent = batteryPercent
         self.charging = charging
         self.network = network
         self.runningApps = runningApps
         self.cpuPercent = cpuPercent
         self.memUsedMB = memUsedMB
+        self.memTotalMB = memTotalMB
+        self.diskFreeGB = diskFreeGB
         self.uptimeSec = uptimeSec
     }
 
@@ -384,8 +391,17 @@ public struct DeviceStats: Codable, Sendable {
         case runningApps
         case cpuPercent
         case memUsedMB
+        case memTotalMB
+        case diskFreeGB
         case uptimeSec
     }
+}
+
+public enum RunStatus: String, Codable, Sendable, CaseIterable {
+    case succeeded = "succeeded"
+    case failed = "failed"
+    case denied = "denied"
+    case cancelled = "cancelled"
 }
 
 public struct HistoryItem: Codable, Sendable {
@@ -395,17 +411,19 @@ public struct HistoryItem: Codable, Sendable {
     public var startedAt: Int
     public var finishedAt: Int?
     public var ok: Bool?
+    public var status: RunStatus?
     public var summary: String?
     public var cost: Cost?
     public var stepCount: Int?
 
-    public init(runId: String, deviceId: String, intent: String, startedAt: Int, finishedAt: Int? = nil, ok: Bool? = nil, summary: String? = nil, cost: Cost? = nil, stepCount: Int? = nil) {
+    public init(runId: String, deviceId: String, intent: String, startedAt: Int, finishedAt: Int? = nil, ok: Bool? = nil, status: RunStatus? = nil, summary: String? = nil, cost: Cost? = nil, stepCount: Int? = nil) {
         self.runId = runId
         self.deviceId = deviceId
         self.intent = intent
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.ok = ok
+        self.status = status
         self.summary = summary
         self.cost = cost
         self.stepCount = stepCount
@@ -418,9 +436,31 @@ public struct HistoryItem: Codable, Sendable {
         case startedAt
         case finishedAt
         case ok
+        case status
         case summary
         case cost
         case stepCount
+    }
+}
+
+public struct InstalledApp: Codable, Sendable {
+    public var bundleId: String
+    public var name: String
+    public var running: Bool
+    public var learned: Bool
+
+    public init(bundleId: String, name: String, running: Bool, learned: Bool) {
+        self.bundleId = bundleId
+        self.name = name
+        self.running = running
+        self.learned = learned
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case bundleId
+        case name
+        case running
+        case learned
     }
 }
 
@@ -440,11 +480,12 @@ public struct ModelEntry: Codable, Sendable {
     public var vision: Bool
     public var priceIn: Double
     public var priceOut: Double
+    public var unknownPrice: Bool?
     public var available: Bool
     public var unavailableReason: String?
     public var custom: Bool?
 
-    public init(id: String, label: String, provider: String, tier: ModelTier, zdr: Bool, vision: Bool, priceIn: Double, priceOut: Double, available: Bool, unavailableReason: String? = nil, custom: Bool? = nil) {
+    public init(id: String, label: String, provider: String, tier: ModelTier, zdr: Bool, vision: Bool, priceIn: Double, priceOut: Double, unknownPrice: Bool? = nil, available: Bool, unavailableReason: String? = nil, custom: Bool? = nil) {
         self.id = id
         self.label = label
         self.provider = provider
@@ -453,6 +494,7 @@ public struct ModelEntry: Codable, Sendable {
         self.vision = vision
         self.priceIn = priceIn
         self.priceOut = priceOut
+        self.unknownPrice = unknownPrice
         self.available = available
         self.unavailableReason = unavailableReason
         self.custom = custom
@@ -467,6 +509,7 @@ public struct ModelEntry: Codable, Sendable {
         case vision
         case priceIn
         case priceOut
+        case unknownPrice
         case available
         case unavailableReason
         case custom
@@ -509,7 +552,7 @@ public struct PlanStep: Codable, Sendable {
 
 public enum PrecheckSource: String, Codable, Sendable, CaseIterable {
     case jev = "jev"
-    case static = "static"
+    case `static` = "static"
     case cache = "cache"
     case fallback = "fallback"
 }
@@ -1327,20 +1370,272 @@ public struct SyncKey: Codable, Sendable {
     }
 }
 
+public struct AppsList: Codable, Sendable {
+    public static let messageType = "apps.list"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "apps.list"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public struct AppsPage: Codable, Sendable {
+    public static let messageType = "apps.page"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "apps.page"
+    public var ref: String?
+    public var apps: [InstalledApp]
+
+    public init(id: String, ref: String? = nil, apps: [InstalledApp]) {
+        self.id = id
+        self.ref = ref
+        self.apps = apps
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case ref
+        case apps
+    }
+}
+
+public struct ShortcutsGet: Codable, Sendable {
+    public static let messageType = "shortcuts.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "shortcuts.get"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public struct ShortcutPut: Codable, Sendable {
+    public static let messageType = "shortcut.put"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "shortcut.put"
+    public var shortcut: Shortcut
+
+    public init(id: String, shortcut: Shortcut) {
+        self.id = id
+        self.shortcut = shortcut
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case shortcut
+    }
+}
+
+public struct ShortcutDelete: Codable, Sendable {
+    public static let messageType = "shortcut.delete"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "shortcut.delete"
+    public var shortcutId: String
+
+    public init(id: String, shortcutId: String) {
+        self.id = id
+        self.shortcutId = shortcutId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case shortcutId
+    }
+}
+
+public struct ShortcutsReorder: Codable, Sendable {
+    public static let messageType = "shortcuts.reorder"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "shortcuts.reorder"
+    public var shortcutIds: [String]
+
+    public init(id: String, shortcutIds: [String]) {
+        self.id = id
+        self.shortcutIds = shortcutIds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case shortcutIds
+    }
+}
+
+public struct HistoryGet: Codable, Sendable {
+    public static let messageType = "history.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "history.get"
+    public var runId: String
+
+    public init(id: String, runId: String) {
+        self.id = id
+        self.runId = runId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case runId
+    }
+}
+
+public struct HistoryDetail: Codable, Sendable {
+    public static let messageType = "history.detail"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "history.detail"
+    public var ref: String?
+    public var item: HistoryItem
+    public var events: [JSONValue]
+
+    public init(id: String, ref: String? = nil, item: HistoryItem, events: [JSONValue]) {
+        self.id = id
+        self.ref = ref
+        self.item = item
+        self.events = events
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case ref
+        case item
+        case events
+    }
+}
+
+public struct AppCardUpdate: Codable, Sendable {
+    public static let messageType = "app.card.update"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "app.card.update"
+    public var cardId: String
+    public var name: String
+    public var hidden: Bool
+
+    public init(id: String, cardId: String, name: String, hidden: Bool) {
+        self.id = id
+        self.cardId = cardId
+        self.name = name
+        self.hidden = hidden
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case cardId
+        case name
+        case hidden
+    }
+}
+
+public struct PermissionsGet: Codable, Sendable {
+    public static let messageType = "permissions.get"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "permissions.get"
+
+    public init(id: String) {
+        self.id = id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+    }
+}
+
+public struct PermissionsStatePermissions: Codable, Sendable {
+    public var accessibility: Bool
+    public var screenCapture: Bool
+    public var automation: String
+
+    public init(accessibility: Bool, screenCapture: Bool, automation: String) {
+        self.accessibility = accessibility
+        self.screenCapture = screenCapture
+        self.automation = automation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case accessibility
+        case screenCapture
+        case automation
+    }
+}
+
+public struct PermissionsState: Codable, Sendable {
+    public static let messageType = "permissions.state"
+    public var v: Int = 1
+    public var id: String
+    public var type: String = "permissions.state"
+    public var ref: String?
+    public var deviceId: String
+    public var permissions: PermissionsStatePermissions
+
+    public init(id: String, ref: String? = nil, deviceId: String, permissions: PermissionsStatePermissions) {
+        self.id = id
+        self.ref = ref
+        self.deviceId = deviceId
+        self.permissions = permissions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case v
+        case id
+        case `type`
+        case ref
+        case deviceId
+        case permissions
+    }
+}
+
 public struct RunCreated: Codable, Sendable {
     public static let messageType = "run.created"
     public var v: Int = 1
     public var id: String
     public var type: String = "run.created"
     public var runId: String
+    public var requestId: String?
     public var deviceId: String
     public var intent: String
     public var provider: String
     public var plan: [PlanStep]
 
-    public init(id: String, runId: String, deviceId: String, intent: String, provider: String, plan: [PlanStep]) {
+    public init(id: String, runId: String, requestId: String? = nil, deviceId: String, intent: String, provider: String, plan: [PlanStep]) {
         self.id = id
         self.runId = runId
+        self.requestId = requestId
         self.deviceId = deviceId
         self.intent = intent
         self.provider = provider
@@ -1352,6 +1647,7 @@ public struct RunCreated: Codable, Sendable {
         case id
         case `type`
         case runId
+        case requestId
         case deviceId
         case intent
         case provider
@@ -1546,16 +1842,20 @@ public struct RunFinished: Codable, Sendable {
     public var id: String
     public var type: String = "run.finished"
     public var runId: String
+    public var requestId: String?
     public var ok: Bool
+    public var status: RunStatus?
     public var summary: String
     public var cost: Cost
     public var stepCount: Int
     public var cancelled: Bool?
 
-    public init(id: String, runId: String, ok: Bool, summary: String, cost: Cost, stepCount: Int, cancelled: Bool? = nil) {
+    public init(id: String, runId: String, requestId: String? = nil, ok: Bool, status: RunStatus? = nil, summary: String, cost: Cost, stepCount: Int, cancelled: Bool? = nil) {
         self.id = id
         self.runId = runId
+        self.requestId = requestId
         self.ok = ok
+        self.status = status
         self.summary = summary
         self.cost = cost
         self.stepCount = stepCount
@@ -1567,7 +1867,9 @@ public struct RunFinished: Codable, Sendable {
         case id
         case `type`
         case runId
+        case requestId
         case ok
+        case status
         case summary
         case cost
         case stepCount
@@ -1718,11 +2020,13 @@ public struct Stats: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "stats"
+    public var ref: String?
     public var deviceId: String
     public var stats: DeviceStats
 
-    public init(id: String, deviceId: String, stats: DeviceStats) {
+    public init(id: String, ref: String? = nil, deviceId: String, stats: DeviceStats) {
         self.id = id
+        self.ref = ref
         self.deviceId = deviceId
         self.stats = stats
     }
@@ -1731,6 +2035,7 @@ public struct Stats: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case deviceId
         case stats
     }
@@ -1741,6 +2046,7 @@ public struct Capabilities: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "capabilities"
+    public var ref: String?
     public var deviceId: String
     public var platform: DevicePlatform
     public var name: String
@@ -1750,8 +2056,9 @@ public struct Capabilities: Codable, Sendable {
     public var brainUnavailableReason: String?
     public var daemonVersion: String
 
-    public init(id: String, deviceId: String, platform: DevicePlatform, name: String, tools: [ToolDescriptor], scope: Scope, brainAvailable: Bool, brainUnavailableReason: String? = nil, daemonVersion: String) {
+    public init(id: String, ref: String? = nil, deviceId: String, platform: DevicePlatform, name: String, tools: [ToolDescriptor], scope: Scope, brainAvailable: Bool, brainUnavailableReason: String? = nil, daemonVersion: String) {
         self.id = id
+        self.ref = ref
         self.deviceId = deviceId
         self.platform = platform
         self.name = name
@@ -1766,6 +2073,7 @@ public struct Capabilities: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case deviceId
         case platform
         case name
@@ -1800,12 +2108,14 @@ public struct PrivacyState: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "privacy.state"
+    public var ref: String?
     public var deviceId: String
     public var settings: PrivacySettings
     public var dataFlow: [PrivacyStateDataFlowItem]
 
-    public init(id: String, deviceId: String, settings: PrivacySettings, dataFlow: [PrivacyStateDataFlowItem]) {
+    public init(id: String, ref: String? = nil, deviceId: String, settings: PrivacySettings, dataFlow: [PrivacyStateDataFlowItem]) {
         self.id = id
+        self.ref = ref
         self.deviceId = deviceId
         self.settings = settings
         self.dataFlow = dataFlow
@@ -1815,6 +2125,7 @@ public struct PrivacyState: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case deviceId
         case settings
         case dataFlow
@@ -1826,11 +2137,13 @@ public struct HistoryPage: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "history.page"
+    public var ref: String?
     public var items: [HistoryItem]
     public var nextCursor: String?
 
-    public init(id: String, items: [HistoryItem], nextCursor: String? = nil) {
+    public init(id: String, ref: String? = nil, items: [HistoryItem], nextCursor: String? = nil) {
         self.id = id
+        self.ref = ref
         self.items = items
         self.nextCursor = nextCursor
     }
@@ -1839,6 +2152,7 @@ public struct HistoryPage: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case items
         case nextCursor
     }
@@ -1860,13 +2174,15 @@ public struct AppLearnProgress: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "app.learn.progress"
+    public var ref: String?
     public var bundleId: String
     public var phase: AppLearnProgressPhase
     public var found: Int
     public var message: String?
 
-    public init(id: String, bundleId: String, phase: AppLearnProgressPhase, found: Int, message: String? = nil) {
+    public init(id: String, ref: String? = nil, bundleId: String, phase: AppLearnProgressPhase, found: Int, message: String? = nil) {
         self.id = id
+        self.ref = ref
         self.bundleId = bundleId
         self.phase = phase
         self.found = found
@@ -1877,6 +2193,7 @@ public struct AppLearnProgress: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case bundleId
         case phase
         case found
@@ -1889,10 +2206,12 @@ public struct AppCards: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "app.cards"
+    public var ref: String?
     public var cards: [CapabilityCard]
 
-    public init(id: String, cards: [CapabilityCard]) {
+    public init(id: String, ref: String? = nil, cards: [CapabilityCard]) {
         self.id = id
+        self.ref = ref
         self.cards = cards
     }
 
@@ -1900,6 +2219,7 @@ public struct AppCards: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case cards
     }
 }
@@ -1909,12 +2229,14 @@ public struct ModelsCatalog: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "models.catalog"
+    public var ref: String?
     public var models: [ModelEntry]
     public var defaultModel: String
     public var brainLocation: BrainLocation
 
-    public init(id: String, models: [ModelEntry], defaultModel: String, brainLocation: BrainLocation) {
+    public init(id: String, ref: String? = nil, models: [ModelEntry], defaultModel: String, brainLocation: BrainLocation) {
         self.id = id
+        self.ref = ref
         self.models = models
         self.defaultModel = defaultModel
         self.brainLocation = brainLocation
@@ -1924,6 +2246,7 @@ public struct ModelsCatalog: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case models
         case defaultModel
         case brainLocation
@@ -1935,10 +2258,12 @@ public struct ShortcutsList: Codable, Sendable {
     public var v: Int = 1
     public var id: String
     public var type: String = "shortcuts.list"
+    public var ref: String?
     public var shortcuts: [Shortcut]
 
-    public init(id: String, shortcuts: [Shortcut]) {
+    public init(id: String, ref: String? = nil, shortcuts: [Shortcut]) {
         self.id = id
+        self.ref = ref
         self.shortcuts = shortcuts
     }
 
@@ -1946,6 +2271,7 @@ public struct ShortcutsList: Codable, Sendable {
         case v
         case id
         case `type`
+        case ref
         case shortcuts
     }
 }
@@ -2941,6 +3267,17 @@ public enum AnyMessage: Codable, Sendable {
     case capabilitiesGet(CapabilitiesGet)
     case modelsList(ModelsList)
     case syncKey(SyncKey)
+    case appsList(AppsList)
+    case appsPage(AppsPage)
+    case shortcutsGet(ShortcutsGet)
+    case shortcutPut(ShortcutPut)
+    case shortcutDelete(ShortcutDelete)
+    case shortcutsReorder(ShortcutsReorder)
+    case historyGet(HistoryGet)
+    case historyDetail(HistoryDetail)
+    case appCardUpdate(AppCardUpdate)
+    case permissionsGet(PermissionsGet)
+    case permissionsState(PermissionsState)
     case runCreated(RunCreated)
     case planUpdated(PlanUpdated)
     case stepStarted(StepStarted)
@@ -3022,6 +3359,17 @@ public enum AnyMessage: Codable, Sendable {
         case .capabilitiesGet: return "capabilities.get"
         case .modelsList: return "models.list"
         case .syncKey: return "sync.key"
+        case .appsList: return "apps.list"
+        case .appsPage: return "apps.page"
+        case .shortcutsGet: return "shortcuts.get"
+        case .shortcutPut: return "shortcut.put"
+        case .shortcutDelete: return "shortcut.delete"
+        case .shortcutsReorder: return "shortcuts.reorder"
+        case .historyGet: return "history.get"
+        case .historyDetail: return "history.detail"
+        case .appCardUpdate: return "app.card.update"
+        case .permissionsGet: return "permissions.get"
+        case .permissionsState: return "permissions.state"
         case .runCreated: return "run.created"
         case .planUpdated: return "plan.updated"
         case .stepStarted: return "step.started"
@@ -3105,6 +3453,17 @@ public enum AnyMessage: Codable, Sendable {
         case "capabilities.get": self = .capabilitiesGet(try c.decode(CapabilitiesGet.self))
         case "models.list": self = .modelsList(try c.decode(ModelsList.self))
         case "sync.key": self = .syncKey(try c.decode(SyncKey.self))
+        case "apps.list": self = .appsList(try c.decode(AppsList.self))
+        case "apps.page": self = .appsPage(try c.decode(AppsPage.self))
+        case "shortcuts.get": self = .shortcutsGet(try c.decode(ShortcutsGet.self))
+        case "shortcut.put": self = .shortcutPut(try c.decode(ShortcutPut.self))
+        case "shortcut.delete": self = .shortcutDelete(try c.decode(ShortcutDelete.self))
+        case "shortcuts.reorder": self = .shortcutsReorder(try c.decode(ShortcutsReorder.self))
+        case "history.get": self = .historyGet(try c.decode(HistoryGet.self))
+        case "history.detail": self = .historyDetail(try c.decode(HistoryDetail.self))
+        case "app.card.update": self = .appCardUpdate(try c.decode(AppCardUpdate.self))
+        case "permissions.get": self = .permissionsGet(try c.decode(PermissionsGet.self))
+        case "permissions.state": self = .permissionsState(try c.decode(PermissionsState.self))
         case "run.created": self = .runCreated(try c.decode(RunCreated.self))
         case "plan.updated": self = .planUpdated(try c.decode(PlanUpdated.self))
         case "step.started": self = .stepStarted(try c.decode(StepStarted.self))
@@ -3189,6 +3548,17 @@ public enum AnyMessage: Codable, Sendable {
         case .capabilitiesGet(let v): try c.encode(v)
         case .modelsList(let v): try c.encode(v)
         case .syncKey(let v): try c.encode(v)
+        case .appsList(let v): try c.encode(v)
+        case .appsPage(let v): try c.encode(v)
+        case .shortcutsGet(let v): try c.encode(v)
+        case .shortcutPut(let v): try c.encode(v)
+        case .shortcutDelete(let v): try c.encode(v)
+        case .shortcutsReorder(let v): try c.encode(v)
+        case .historyGet(let v): try c.encode(v)
+        case .historyDetail(let v): try c.encode(v)
+        case .appCardUpdate(let v): try c.encode(v)
+        case .permissionsGet(let v): try c.encode(v)
+        case .permissionsState(let v): try c.encode(v)
         case .runCreated(let v): try c.encode(v)
         case .planUpdated(let v): try c.encode(v)
         case .stepStarted(let v): try c.encode(v)

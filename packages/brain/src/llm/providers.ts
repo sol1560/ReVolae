@@ -44,12 +44,12 @@ export function createProvider(id: string, env: Record<string, string | undefine
     case "ollama":
       return new AnthropicWireProvider(
         { id, tier: "local", zdr: true, vision: true, priceIn: 0, priceOut: 0 },
-        { baseUrl: env.OLLAMA_HOST ?? "http://127.0.0.1:11434", apiKey: "ollama", model },
+        { baseUrl: localModelURL("ollama", env), apiKey: "ollama", model },
       );
     case "lmstudio":
       return new OpenAIWireProvider(
         { id, tier: "local", zdr: true, vision: true, priceIn: 0, priceOut: 0 },
-        { baseUrl: env.LMSTUDIO_HOST ?? "http://127.0.0.1:1234/v1", apiKey: "lm-studio", model },
+        { baseUrl: localModelURL("lmstudio", env), apiKey: "lm-studio", model },
       );
     case "openai-compat": {
       const at = model.lastIndexOf("@");
@@ -64,18 +64,27 @@ export function createProvider(id: string, env: Record<string, string | undefine
   }
 }
 
+/** “本机”只连接明确的回环地址，不依赖 DNS，也不允许 URL 中携带凭据。 */
+export function localModelURL(provider: "ollama" | "lmstudio", env: Record<string, string | undefined>): string {
+  let url: URL;
+  try { url = new URL(provider === "ollama" ? env.OLLAMA_HOST ?? "http://127.0.0.1:11434" : env.LMSTUDIO_HOST ?? "http://127.0.0.1:1234/v1"); }
+  catch { throw new Error("本机模型地址无效"); }
+  if (url.hostname === "localhost") url.hostname = "127.0.0.1";
+  if (!["http:", "https:"].includes(url.protocol) || !["127.0.0.1", "[::1]"].includes(url.hostname)
+    || url.username || url.password || url.search || url.hash) {
+    throw new Error("本机模型只接受回环地址；远程服务请使用 openai-compat 并选择非本地档位");
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
 function need(v: string | undefined, name: string): string {
   if (!v) throw new Error(`缺少环境变量 ${name}`);
   return v;
 }
 
-/** 每百万 token 美元。不在表里的记 0 并在成本里标 unknownPrice。 */
-const PRICES: Record<string, { priceIn: number; priceOut: number }> = {
-  "anthropic:claude-fable-5.1": { priceIn: 3, priceOut: 15 },
-  "openai:gpt-6-astra": { priceIn: 2.5, priceOut: 10 },
-};
-export function lookupPrice(id: string): { priceIn: number; priceOut: number } {
-  return PRICES[id] ?? { priceIn: 0, priceOut: 0 };
+/** 尚未接通已核实的云端费率；不把旧写死的数字当成实际账单。 */
+export function lookupPrice(id: string): { priceIn: number; priceOut: number; unknownPrice: boolean } {
+  return { priceIn: 0, priceOut: 0, unknownPrice: !id.startsWith("ollama:") && !id.startsWith("lmstudio:") };
 }
 
 export function tierOf(p: Provider): ModelTier {

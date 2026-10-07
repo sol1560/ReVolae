@@ -41,7 +41,7 @@ class ProtocolTest {
         val b64 = Base64.getEncoder()
         val vector = buildJsonObject {
             put("suite", "DHKEM(X25519,HKDF-SHA256)/HKDF-SHA256/ChaCha20-Poly1305"); put("mode", "auth")
-            put("from", from); put("to", to); put("info", b64.encodeToString("cuaremote-v1|$from|$to".toByteArray()))
+            put("from", from); put("to", to); put("info", b64.encodeToString("cuaremote-v2|$from|$to".toByteArray()))
             put("senderPrivate", b64.encodeToString(HpkeSuite.privateBytes(senderKeys))); put("senderPublic", b64.encodeToString(HpkeSuite.publicBytes(senderKeys)))
             put("recipientPrivate", b64.encodeToString(HpkeSuite.privateBytes(recipientKeys))); put("recipientPublic", b64.encodeToString(HpkeSuite.publicBytes(recipientKeys)))
             put("enc", b64.encodeToString(sender.encapsulation)); put("aad", b64.encodeToString(aad)); put("plaintext", b64.encodeToString(plain1)); put("ciphertext", b64.encodeToString(cipher1))

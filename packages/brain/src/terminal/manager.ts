@@ -30,6 +30,8 @@ export interface TerminalManagerOptions {
    * 已用过的 nonce → expiresAt。传进来可以让宿主持久化（重启后旧签名 300 秒内仍不能重放）；不传就只在内存里记。
    */
   nonces?: Map<string, number>;
+  /** 验签后、启动 shell 前持久保存；保存失败时禁止执行。 */
+  consumeNonce?: (nonce: string, expiresAt: number) => void;
   /** 第一个 streamId。默认按进程启动时间取一个大数，重启后不会和上一轮的 streamId 撞上 */
   firstStreamId?: number;
   /** 同时最多几个会话，默认 8 */
@@ -142,6 +144,11 @@ export class TerminalManager {
       if (!r.ok) {
         this.o.log?.({ t: "terminal.open.rejected", sessionId: m.sessionId, reason: r.reason });
         return fail("approval_invalid", r.message);
+      }
+      try {
+        this.o.consumeNonce?.(m.signature!.nonce, m.signature!.expiresAt);
+      } catch {
+        return fail("approval_storage", "无法保存确认记录，未启动终端");
       }
       this.nonces.set(m.signature!.nonce, m.signature!.expiresAt);
     }

@@ -1,0 +1,184 @@
+name: Native iPhone to Mac E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [e2e/native-iphone-mac]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: native-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CUAREMOTE_PROVIDER: zenmux:openai/gpt-4.1-mini
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  mac:
+    name: macOS receiver (real host)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Require real model credentials
+        env:
+          ZENMUX_API_KEY: ${{ secrets.ZENMUX_API_KEY }}
+        run: test -n "$ZENMUX_API_KEY" || { echo '缺少 ZENMUX_API_KEY，不能用 mock 代替'; exit 1; }
+      - run: swift test --package-path packages/protocol/swift -j 4
+      - run: swift test --package-path apps/daemon-macos -j 4
+      - run: brew install cloudflared
+      - name: Wait for the other runner to finish building its iPhone app
+        run: bun scripts/e2e/exchange.ts wait "$RUNNER_TEMP/phone-key" "phone-key-${GITHUB_RUN_ATTEMPT}"
+      - name: Start authenticated hub and real Mac host
+        env:
+          ZENMUX_API_KEY: ${{ secrets.ZENMUX_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/revolae"
+          cloudflared tunnel --url http://127.0.0.1:8788 --no-autoupdate > "$RUNNER_TEMP/tunnel.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/tunnel.pid"
+          for i in $(seq 1 60); do
+            URL=$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$RUNNER_TEMP/tunnel.log" | head -1 || true)
+            if [ -n "$URL" ]; then break; fi
+            sleep 2
+          done
+          test -n "$URL"
+          export E2E_HUB_URL="${URL/https:/wss:}/ws"
+          bun scripts/e2e/host.ts start "$RUNNER_TEMP/revolae" > "$RUNNER_TEMP/host.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/host.pid"
+          for i in $(seq 1 60); do
+            if [ -f "$RUNNER_TEMP/revolae/connection.json" ]; then break; fi
+            sleep 1
+          done
+          test -f "$RUNNER_TEMP/revolae/connection.json"
+          bun scripts/e2e/exchange.ts seal "$RUNNER_TEMP/phone-key" "$RUNNER_TEMP/revolae/connection.json" "$RUNNER_TEMP/connection.sealed.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: connection-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/connection.sealed.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Stay online until the iPhone finishes; verify Mac side effects
+        run: |
+          bun scripts/e2e/exchange.ts wait "$RUNNER_TEMP/phone-result" "phone-result-${GITHUB_RUN_ATTEMPT}"
+          test "$(cat "$RUNNER_TEMP/phone-result/exit-code")" = 0
+          bun scripts/e2e/host.ts verify "$RUNNER_TEMP/revolae"
+      - name: Stop the host before publishing test evidence
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/revolae/host.pid" ]; then
+            bun scripts/e2e/host.ts stop "$RUNNER_TEMP/revolae"
+          fi
+          if [ -f "$RUNNER_TEMP/tunnel.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/tunnel.pid")" 2>/dev/null || true
+          fi
+          printf 'stopped\n' > "$RUNNER_TEMP/host-stopped"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-stopped-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/host-stopped
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-evidence-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/revolae/events.jsonl
+            ${{ runner.temp }}/revolae/verification.json
+            ${{ runner.temp }}/host.log
+          retention-days: 7
+
+  iphone:
+    name: iPhone simulator sender (separate Mac)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: brew install xcodegen
+      - name: Build the real app and UI tests before pairing starts
+        run: |
+          xcodegen generate --spec apps/ios/project.yml --project apps/ios
+          xcodebuild -project apps/ios/CuaRemote.xcodeproj -scheme CuaRemote -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath apps/ios/.build \
+            -jobs 4 build-for-testing CODE_SIGN_IDENTITY=-
+      - name: Create a dedicated simulator and ephemeral exchange key
+        run: |
+          RUNTIME=$(xcrun simctl list runtimes --json | jq -r '[.runtimes[] | select(.isAvailable and (.identifier | contains(".iOS-")))] | sort_by(.version | split(".") | map(tonumber)) | last | .identifier')
+          test "$RUNTIME" != null
+          DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
+          xcrun simctl list devicetypes --json | jq -e --arg type "$DEVICE_TYPE" 'any(.devicetypes[]; .identifier == $type)'
+          SIMULATOR=$(xcrun simctl create "ReVolae E2E $GITHUB_RUN_ID" "$DEVICE_TYPE" "$RUNTIME")
+          echo "SIMULATOR=$SIMULATOR" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIMULATOR"
+          xcrun simctl bootstatus "$SIMULATOR" -b
+          bun scripts/e2e/exchange.ts keys "$RUNNER_TEMP/phone-key"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-key-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phone-key/public.pem
+          retention-days: 1
+          if-no-files-found: error
+      - name: Receive encrypted connection settings
+        run: |
+          bun scripts/e2e/exchange.ts wait "$RUNNER_TEMP/connection" "connection-${GITHUB_RUN_ATTEMPT}"
+          bun scripts/e2e/exchange.ts open "$RUNNER_TEMP/phone-key" "$RUNNER_TEMP/connection/connection.sealed.json" "$RUNNER_TEMP/connection.json"
+          bun -e 'const c = await Bun.file(process.argv[1]).json(); for (const key of ["E2E_TOKEN", "E2E_PAIR_CODE"]) console.log("::add-mask::" + c[key])' "$RUNNER_TEMP/connection.json"
+          python3 apps/ios/scripts/configure-ui-test.py apps/ios/.build/Build/Products "$RUNNER_TEMP/connection.json"
+      - name: Drive the real iPhone UI against the other Mac
+        id: uitest
+        run: |
+          XCTESTRUN=$(find apps/ios/.build/Build/Products -maxdepth 1 -name '*.xctestrun' -print -quit)
+          test -n "$XCTESTRUN"
+          python3 apps/ios/scripts/record-simulator.py "$SIMULATOR" "$RUNNER_TEMP/uitest.log" \
+            "$RUNNER_TEMP/iphone.mp4" "$RUNNER_TEMP/record.stop" &
+          RECORDER=$!
+          set +e
+          xcodebuild test-without-building -xctestrun "$XCTESTRUN" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR" -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/iphone.xcresult" CODE_SIGN_IDENTITY=- 2>&1 | tee "$RUNNER_TEMP/uitest.log"
+          CODE=${PIPESTATUS[0]}
+          touch "$RUNNER_TEMP/record.stop"
+          wait "$RECORDER" || echo '::warning::录像未完成，请查看测试截图和测试结果'
+          printf '%s' "$CODE" > "$RUNNER_TEMP/exit-code"
+          exit "$CODE"
+      - name: Record setup failure instead of reporting a skipped pass
+        if: always()
+        run: test -f "$RUNNER_TEMP/exit-code" || printf '1' > "$RUNNER_TEMP/exit-code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phone-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/exit-code
+          retention-days: 1
+      - name: Wait until the test endpoint is shut down
+        id: host_shutdown
+        if: always()
+        run: bun scripts/e2e/exchange.ts wait "$RUNNER_TEMP/host-stopped" "host-stopped-${GITHUB_RUN_ATTEMPT}"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.host_shutdown.outcome == 'success'
+        with:
+          name: iphone-evidence-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/iphone.xcresult
+            ${{ runner.temp }}/iphone.mp4
+          retention-days: 7
+      - name: Shut down only the simulator created by this job
+        if: always()
+        run: |
+          if [ -n "${SIMULATOR:-}" ]; then
+            xcrun simctl shutdown "$SIMULATOR" || true
+            xcrun simctl delete "$SIMULATOR"
+          fi
+          rm -f "$RUNNER_TEMP/phone-key/private.pem" "$RUNNER_TEMP/connection.json"

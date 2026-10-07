@@ -169,10 +169,10 @@ describe("hub 单机模式", () => {
 
     const res2 = await fetch(`${http}/api/pair/code`, { method: "POST", headers: { authorization: `Bearer ${mac.sessionToken}` }, body: JSON.stringify({ deviceId: mac.id, name: "Mac", pubKeys: mac.pubKeys, secret: "c2VjcmV0c2VjcmV0MTI=" }) });
     const { code: code2 } = (await res2.json()) as { code: string };
-    now += 301;
+    now += 300;
     phone.send({ type: "pair.code.claim", code: code2, phoneId: phone.id, phonePubKeys: phone.pubKeys });
     expect((await phone.expect("error")).code).toBe("bad_code");
-    now -= 301;
+    now -= 300;
 
     // 手机不能领码
     const forbidden = await fetch(`${http}/api/pair/code`, { method: "POST", headers: { authorization: `Bearer ${phone.sessionToken}` }, body: "{}" });

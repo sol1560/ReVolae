@@ -191,6 +191,7 @@ export class Billing {
   async settle(accountId: string, runId: string, cost: Cost): Promise<{ credits: number; balance?: number }> {
     const row = this.store.getRunBilling(runId) ?? this.store.reserveRun({ runId, accountId, kind: "free" }, this.now());
     if (row.settled) return { credits: row.credits };
+    if (cost.unknownPrice) throw new Error("模型价格尚未核实，不能结算本次费用");
     const credits = row.kind === "credits" ? this.creditsFor(cost.usd) : 0;
     let balance: number | undefined;
     if (credits > 0) {

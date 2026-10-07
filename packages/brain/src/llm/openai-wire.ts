@@ -25,6 +25,7 @@ export class OpenAIWireProvider implements Provider {
       headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}), ...this.cfg.extraHeaders },
       body: JSON.stringify(body),
       signal: req.signal,
+      redirect: this.info.tier === "local" ? "error" : "follow",
     });
     if (!res.ok) throw new Error(`${this.info.id} HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
     const json = (await res.json()) as OpenAIResponse;

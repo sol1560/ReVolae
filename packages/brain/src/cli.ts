@@ -12,6 +12,7 @@ import { runIntent, type ApprovalGate, type BrainEvent } from "./agent/loop.js";
 import { CuaDriver } from "./gui/cua-driver.js";
 import { LocalBunHost } from "./host/local-bun-host.js";
 import { runHostMode } from "./host-mode.js";
+import { startDevice } from "./device.js";
 import { JevClient } from "./jev/client.js";
 import { PolicyEngine, type Autonomy } from "./jev/policy.js";
 import { createProvider } from "./llm/providers.js";
@@ -26,7 +27,37 @@ const has = (name: string) => argv.includes(`--${name}`);
 const defaultProvider = flag("provider") ?? process.env.CUAREMOTE_PROVIDER ?? "anthropic:claude-fable-5.1";
 const logPath = flag("log") ?? join(homedir(), ".cuaremote", "logs", `brain-${new Date().toISOString().slice(0, 10)}.jsonl`);
 
-if (flag("mode") === "host") {
+if (argv[0] === "device") {
+  const hubURL = flag("hub");
+  const allowedDir = flag("allow-dir");
+  if (!hubURL || !allowedDir) throw new Error("用法：brain device --hub <ws(s)地址> --allow-dir <目录> --provider <真实模型> [--state-dir <目录>]");
+  const log = new JsonlLog(logPath);
+  const device = await startDevice({
+    hubURL, allowedDirs: [allowedDir], provider: defaultProvider,
+    stateDir: flag("state-dir") ?? join(homedir(), ".cuaremote", "device"),
+    name: flag("name"), token: process.env.CUAREMOTE_HUB_TOKEN,
+    log: (event) => log.write(event),
+  });
+  console.log(JSON.stringify({ type: "device.ready", deviceId: device.deviceId, code: device.code, expiresAt: device.offer.expiresAt }));
+  process.on("SIGINT", () => device.close());
+  process.on("SIGTERM", () => device.close());
+  const commands = createInterface({ input: process.stdin, terminal: false });
+  commands.on("line", (line) => {
+    void (async () => {
+      let command;
+      try { command = JSON.parse(line); } catch { throw new Error("本机控制命令格式无效"); }
+      if (command?.type !== "pairing.refresh") throw new Error("不支持的本机控制命令");
+      const pairing = await device.refreshPairing();
+      console.log(JSON.stringify({ type: "device.pairing_updated", deviceId: device.deviceId, code: pairing.code, expiresAt: pairing.offer.expiresAt }));
+    })().catch((e) => {
+      const error = { type: "device.command_failed", message: e instanceof Error ? e.message : "本机控制失败" };
+      log.write(error);
+      console.error(JSON.stringify(error));
+    });
+  });
+  await device.finished;
+  commands.close();
+} else if (flag("mode") === "host") {
   await runHostMode({ defaultProvider, logPath, cuaArgv: flag("cua")?.split(" ") });
 } else if (argv[0] === "tools") {
   const host = new LocalBunHost();
@@ -61,7 +92,7 @@ if (flag("mode") === "host") {
       case "step.precheck": console.error(`   预检 L${e.level} ${e.verdict} (${e.source}${e.jevMs ? ` ${e.jevMs}ms` : ""})`); break;
       case "step.finished": console.error(`   ${e.ok ? "✓" : "✗"} ${e.ms}ms${e.error ? ` ${e.error}` : ""}`); if (e.output) console.error(indent(e.output.slice(0, 600))); break;
       case "terminal.suggestion": console.log(e.command); console.error(`   ${e.explanation}`); break;
-      case "run.finished": console.error(`\n${e.ok ? "完成" : "失败"}：${e.summary}\n成本：$${e.cost.usd.toFixed(4)}（in ${e.cost.inputTokens} / out ${e.cost.outputTokens} / jev ${e.cost.jevTokens}），${e.stepCount} 步`); break;
+      case "run.finished": console.error(`\n${e.ok ? "完成" : "失败"}：${e.summary}\n成本：${e.cost.unknownPrice ? "未知（模型价格未核实）" : `$${e.cost.usd.toFixed(4)}`}（in ${e.cost.inputTokens} / out ${e.cost.outputTokens} / jev ${e.cost.jevTokens}），${e.stepCount} 步`); break;
       case "error": console.error(`错误 ${e.code}: ${e.message}`); break;
     }
   };
