@@ -17,6 +17,7 @@ export interface ToolResult {
  */
 export interface Host {
   listTools(): Promise<{ tools: ToolDescriptor[]; scope: Scope }>;
-  call(tool: string, args: Record<string, unknown>, timeoutMs?: number): Promise<ToolResult>;
+  prepareCall?(tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
+  call(tool: string, args: Record<string, unknown>, timeoutMs?: number, signal?: AbortSignal): Promise<ToolResult>;
   close?(): Promise<void>;
 }
