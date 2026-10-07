@@ -166,6 +166,14 @@ final class RemoteClientTests: XCTestCase {
         device.disconnect()
     }
 
+    func testRelayFailureOnTheCurrentLinkStillFailsClosed() {
+        let observed = UUID()
+        XCTAssertFalse(RemoteClient.relayFailureWasReplaced(observed: observed, current: nil))
+        XCTAssertFalse(RemoteClient.relayFailureWasReplaced(observed: observed, current: observed))
+        XCTAssertTrue(RemoteClient.relayFailureWasReplaced(observed: observed, current: UUID()))
+        XCTAssertTrue(RemoteClient.relayFailureWasReplaced(observed: nil, current: UUID()))
+    }
+
     private func makeClient(role: RemoteRole, name: String) throws -> RemoteClient {
         let store = MemoryStore()
         let identity = try DeviceIdentityRepository(store: store).loadOrCreate()

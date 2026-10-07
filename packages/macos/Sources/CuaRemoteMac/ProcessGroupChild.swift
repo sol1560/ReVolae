@@ -7,6 +7,7 @@ final class ProcessGroupChild: @unchecked Sendable {
     private static let maximumQueuedWriteBytes = 4_194_304
     private static let writePollTimeoutMilliseconds: Int32 = 100
     private static let writeTimeout: TimeInterval = 10
+    private static let terminationGrace: TimeInterval = 1
 
     private let pid: pid_t
     private let stdinDescriptor: Int32
@@ -26,6 +27,8 @@ final class ProcessGroupChild: @unchecked Sendable {
     private var stdinGeneration: UInt64 = 0
     private var queuedWriteBytes = 0
     private var terminationRequested = false
+    private var escalationScheduled = false
+    private var leaderReaped = false
     private var exitNotified = false
     private var stdoutHandler: (@Sendable (Data) -> Void)?
     private var exitHandler: (@Sendable (Int32) -> Void)?
@@ -202,25 +205,39 @@ final class ProcessGroupChild: @unchecked Sendable {
             return
         }
         terminationRequested = true
-        if !processExited {
-            _ = Darwin.kill(-pid, SIGTERM)
+        guard !leaderReaped else {
+            stateLock.unlock()
+            closeInput()
+            return
         }
+        escalationScheduled = true
         stateLock.unlock()
+        _ = Darwin.kill(-pid, SIGTERM)
         closeInput()
-        processQueue.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self else { return }
-            self.stateLock.lock()
-            if !self.processExited {
-                _ = Darwin.kill(-self.pid, SIGKILL)
-            }
-            self.stateLock.unlock()
+        processQueue.asyncAfter(deadline: .now() + Self.terminationGrace) { self.escalateTermination() }
+    }
+
+    private func escalateTermination() {
+        stateLock.lock()
+        let groupStillPinned = !leaderReaped
+        escalationScheduled = false
+        stateLock.unlock()
+        if groupStillPinned {
+            _ = Darwin.kill(-pid, SIGKILL)
         }
+        reap(force: true)
     }
 
     func stderrSnapshot() -> Data {
         stateLock.lock()
         defer { stateLock.unlock() }
         return stderrBuffer
+    }
+
+    var leaderHasExited: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return processExited
     }
 
     private func closeStdin() -> Int32 {
@@ -361,34 +378,82 @@ final class ProcessGroupChild: @unchecked Sendable {
                 stderrSource.cancel()
             }
             finishIfReady()
+            reapIfDrained()
         }
     }
 
-    private func reap() {
-        var status: Int32 = 0
+    private func reap(force: Bool = false) {
         stateLock.lock()
+        guard !leaderReaped else {
+            stateLock.unlock()
+            return
+        }
+        let drained = stdoutEOF && stderrEOF
+        let deferReap = !force && (escalationScheduled || !drained)
+        if deferReap {
+            var info = siginfo_t()
+            let result = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
+            if result == 0, info.si_pid != 0 {
+                processExited = true
+                closeInputAfterLeaderExit()
+                stateLock.unlock()
+                return
+            }
+            let code = errno
+            if result < 0, code == ECHILD {
+                leaderReaped = true
+                processExited = true
+                exitStatus = code
+                closeInputAfterLeaderExit()
+                stateLock.unlock()
+                processSource.cancel()
+                finishIfReady()
+                return
+            }
+            stateLock.unlock()
+            scheduleReap(force: force)
+            return
+        }
+
+        var status: Int32 = 0
         let result = waitpid(pid, &status, WNOHANG)
         if result == 0 || (result < 0 && errno == EINTR) {
             stateLock.unlock()
-            processQueue.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in self?.reap() }
+            scheduleReap(force: force)
             return
         }
-        if result < 0 { status = Int32(errno) }
+        let waitError = result < 0 ? errno : 0
+        if result < 0 { status = Int32(waitError) }
+        leaderReaped = true
         processExited = true
         exitStatus = status
-        if stdinOpen {
-            stdinOpen = false
-            stdinGeneration &+= 1
-            _ = Darwin.close(stdinDescriptor)
-        }
+        closeInputAfterLeaderExit()
         stateLock.unlock()
         processSource.cancel()
         finishIfReady()
     }
 
+    private func scheduleReap(force: Bool) {
+        processQueue.asyncAfter(deadline: .now() + .milliseconds(10)) { self.reap(force: force) }
+    }
+
+    private func closeInputAfterLeaderExit() {
+        guard stdinOpen else { return }
+        stdinOpen = false
+        stdinGeneration &+= 1
+        _ = Darwin.close(stdinDescriptor)
+    }
+
+    private func reapIfDrained() {
+        stateLock.lock()
+        let ready = processExited && stdoutEOF && stderrEOF && !leaderReaped
+        stateLock.unlock()
+        if ready { reap() }
+    }
+
     private func finishIfReady() {
         stateLock.lock()
-        let ready = processExited && stdoutEOF && stderrEOF
+        let ready = leaderReaped && stdoutEOF && stderrEOF
         let shouldNotify = ready && !exitNotified && exitHandler != nil
         if shouldNotify { exitNotified = true }
         let status = shouldNotify ? exitStatus : nil
@@ -403,6 +468,13 @@ final class ProcessGroupChild: @unchecked Sendable {
 
     deinit {
         closeInput()
+        stdoutSource.cancel()
+        stderrSource.cancel()
+        processSource.cancel()
+        if !leaderReaped {
+            var status: Int32 = 0
+            _ = waitpid(pid, &status, WNOHANG)
+        }
     }
 }
 

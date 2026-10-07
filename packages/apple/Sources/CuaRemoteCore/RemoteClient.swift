@@ -305,7 +305,12 @@ public final class RemoteClient: ObservableObject {
                             try await self.handleRelay(data, envelope: envelope, generation: expected)
                         } catch {
                             guard self.generation == expected else { return }
-                            if linkToken != self.links[envelope.from]?.token { continue }
+                            if Self.relayFailureWasReplaced(
+                                observed: linkToken,
+                                current: self.links[envelope.from]?.token
+                            ) {
+                                continue
+                            }
                             throw error
                         }
                     @unknown default:
@@ -519,6 +524,11 @@ public final class RemoteClient: ObservableObject {
     private func dropLink(_ peerId: String) {
         links[peerId] = nil
         peers[peerId]?.ready = false
+    }
+
+    static func relayFailureWasReplaced(observed: UUID?, current: UUID?) -> Bool {
+        guard let current else { return false }
+        return current != observed
     }
 
     private func blockPeer(_ peerId: String) {

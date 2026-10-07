@@ -91,6 +91,57 @@ final class MacDaemonSafetyTests: XCTestCase {
         }
     }
 
+    func testTerminationKillsStubbornSameGroupChildAfterLeaderExits() async throws {
+        try await withWorkspace { workspace in
+            let marker = workspace.appendingPathComponent("marker.txt")
+            let child = try ProcessGroupChild.spawn(
+                executable: "/bin/sh",
+                arguments: ["-c", "trap '' TERM; (sleep 3; printf stubborn > \(marker.path)) & exit 0"],
+                workingDirectory: workspace,
+                environment: [:]
+            )
+            let exited = expectation(description: "leader and same-group descendants finished")
+            child.installHandlers(onStdout: { _ in }, onExit: { _ in exited.fulfill() })
+
+            for _ in 0..<100 where !child.leaderHasExited {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTAssertTrue(child.leaderHasExited)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+            child.terminate()
+            await fulfillment(of: [exited], timeout: 3)
+
+            try await Task.sleep(for: .seconds(3.5))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        }
+    }
+
+    func testCompletedChildrenReleaseDescriptorsAndDispatchSources() async throws {
+        try await withWorkspace { workspace in
+            let baseline = Self.openDescriptorCount()
+            for index in 0..<20 {
+                let child = try ProcessGroupChild.spawn(
+                    executable: "/bin/echo",
+                    arguments: ["run-\(index)"],
+                    workingDirectory: workspace,
+                    environment: [:]
+                )
+                let exited = expectation(description: "echo \(index) exited")
+                child.installHandlers(onStdout: { _ in }, onExit: { _ in exited.fulfill() })
+                child.closeInput()
+                await fulfillment(of: [exited], timeout: 10)
+            }
+            try await Task.sleep(for: .milliseconds(200))
+
+            XCTAssertLessThanOrEqual(Self.openDescriptorCount(), baseline + 4)
+        }
+    }
+
+    private static func openDescriptorCount() -> Int {
+        let limit = min(getdtablesize(), 4_096)
+        return (0..<Int32(limit)).reduce(0) { $0 + (fcntl($1, F_GETFD) >= 0 ? 1 : 0) }
+    }
+
     func testSignedApprovalExecutesExactShellWriteOnce() async throws {
         try await withWorkspace { workspace in
             let phone = try DeviceIdentityRepository(store: MemoryStore()).loadOrCreate()
