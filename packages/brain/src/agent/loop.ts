@@ -374,7 +374,7 @@ export function describe(tool: ToolDescriptor, args: Record<string, unknown>): C
       return {
         channel: "shell",
         summary: `运行命令 ${s(args.cmd).slice(0, 60)}`,
-        detail: args.cwd === undefined ? s(args.cmd) : `shell.run\n${JSON.stringify(args, null, 2)}`,
+        detail: `shell.run\n${JSON.stringify(args, null, 2)}`,
         targetPath: args.cwd === undefined ? undefined : s(args.cwd),
       };
     case "applescript.run":

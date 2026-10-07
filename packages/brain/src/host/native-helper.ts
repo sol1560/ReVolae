@@ -10,8 +10,15 @@ export async function nativeHelper<T>(args: string[], schema: z.ZodType<T>, time
   if (signal?.aborted || result.failure === "aborted") throw new Error("Mac 原生服务操作已取消");
   if (result.failure === "timeout") throw new Error("Mac 原生服务响应超时");
   if (result.failure === "input_limit") throw new Error("Mac 原生服务请求超过大小限制");
+  if (result.failure === "spawn_error") throw new Error("无法启动 Mac 原生服务");
   if (result.failure || result.code !== 0 || result.stdinClosedEarly) {
-    throw new Error(result.failure === "spawn_error" ? "无法启动 Mac 原生服务" : "Mac 原生服务执行失败");
+    if (input === undefined && ["inventory", "permissions"].includes(args[0] ?? "")) {
+      const status = result.code === null ? result.failure : `退出码 ${result.code}`;
+      const stderr = result.stderr.toString("utf8").trim().slice(0, 500);
+      const detail = [status, stderr].filter(Boolean).join("：");
+      throw new Error(`Mac 原生服务执行失败${detail ? `（${detail}）` : ""}`);
+    }
+    throw new Error("Mac 原生服务执行失败");
   }
   let value: unknown;
   try {

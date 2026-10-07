@@ -52,7 +52,7 @@
 
 `gui.*` 不在宿主里：brain 自己 spawn `cua-driver mcp` 并做白名单过滤（见 brain 文档）。宿主负责保证 cua-driver 的 TCC 归属（M1 用 `EmbeddedCuaDriverHost` 或让 brain 用 `cua-driver mcp --direct`）。
 
-Mac Brain 的 shell 审批详情绑定完整规范化参数，格式为 `shell.run\n` 加缩进 JSON（命令、有效 cwd、timeoutMs，以及存在时的 stdin）；相对 cwd 以首个允许目录为基准。AppleScript/JXA/快捷指令的审批详情同样绑定工具名和完整调用参数。旧 host 若未提供 cwd 默认值，shell 审批仍显示原命令。
+Mac Brain 的 shell 审批详情绑定完整调用参数，格式为 `shell.run\n` 加缩进 JSON（命令、cwd、timeoutMs，以及存在时的 stdin）；相对 cwd 以首个允许目录为基准。AppleScript/JXA/快捷指令的审批详情同样绑定工具名和完整调用参数。
 
 ## 审批签名
 

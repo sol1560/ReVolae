@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalBunHost } from "../src/host/local-bun-host.js";
@@ -109,6 +109,21 @@ describe("LocalBunHost safety", () => {
     }
   });
 
+  test("honors direct-call timeout without overriding a prepared approval timeout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "local-host-timeout-argument-"));
+    try {
+      const local = host(dir);
+      const direct = await local.call("shell.run", { cmd: "sleep 1" }, 100);
+      const prepared = await local.prepareCall!("shell.run", { cmd: "sleep 0.25", timeoutMs: 5_000 });
+      const approved = await local.call("shell.run", prepared, 100);
+      expect(direct.ok).toBe(false);
+      expect(direct.error).toContain("超时");
+      expect(approved.ok).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("cancellation kills a running shell and its ordinary descendant before a delayed write", async () => {
     const dir = await mkdtemp(join(tmpdir(), "local-host-cancel-"));
     try {
@@ -174,6 +189,42 @@ describe("LocalBunHost safety", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toContain("标准输入");
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds inherited stdin and output pipes after the leader exits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "local-host-inherited-pipes-"));
+    const pidFile = join(dir, "child.pid");
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const startedAt = Date.now();
+      const result = await Promise.race([
+        host(dir).call("shell.run", {
+          cmd: `sleep 30 <&0 & echo $! > ${shQuote(pidFile)}; exit 0`,
+          cwd: dir,
+          stdin: "x".repeat(1_048_576),
+          timeoutMs: 5_000,
+        }),
+        new Promise<never>((_, reject) => {
+          watchdog = setTimeout(() => reject(new Error("进程管道排空超时")), 3_000);
+        }),
+      ]);
+      const childPid = Number((await readFile(pidFile, "utf8")).trim());
+      expect(Number.isSafeInteger(childPid) && childPid > 1).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
+      const childPid = Number((await readFile(pidFile, "utf8").catch(() => "")).trim());
+      if (Number.isSafeInteger(childPid) && childPid > 1) {
+        try {
+          process.kill(childPid, "SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
       await rm(dir, { recursive: true, force: true });
     }
   });

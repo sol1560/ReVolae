@@ -61,8 +61,10 @@ export async function runProcess(argv: readonly string[], options: ProcessRunOpt
   let stdinClosedEarly = false;
   let leaderExited = false;
   let closed = false;
+  let stdinClosed = options.input === undefined;
   let stdoutEnded = false;
   let stderrEnded = false;
+  let leaderExitCode: number | null = null;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let drainTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -126,6 +128,7 @@ export async function runProcess(argv: readonly string[], options: ProcessRunOpt
     child.stderr?.on("data", (chunk: Buffer) => capture(stderr, chunk));
     child.stdout?.once("end", () => { stdoutEnded = true; });
     child.stderr?.once("end", () => { stderrEnded = true; });
+    child.stdin?.once("close", () => { stdinClosed = true; });
     child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
       if (error.code === "EPIPE") {
         stdinClosedEarly = true;
@@ -138,15 +141,22 @@ export async function runProcess(argv: readonly string[], options: ProcessRunOpt
       spawnCode = error.code;
       if (child.pid === undefined) finish(null);
     });
-    child.once("exit", () => {
+    child.once("exit", (code) => {
       leaderExited = true;
+      leaderExitCode = code;
       if (timeout) clearTimeout(timeout);
-      if ((!stdoutEnded || !stderrEnded) && !closed) {
+      if (child.stdin) {
+        if (!child.stdin.writableFinished) stdinClosedEarly = true;
+        child.stdin.destroy();
+      }
+      if ((!stdinClosed || !stdoutEnded || !stderrEnded) && !closed) {
         drainTimeout = setTimeout(() => {
           if (closed) return;
           failure ??= "drain_timeout";
+          child.stdin?.destroy();
           child.stdout?.destroy();
           child.stderr?.destroy();
+          finish(leaderExitCode);
         }, INHERITED_PIPE_DRAIN_MS);
       }
     });

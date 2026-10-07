@@ -88,7 +88,7 @@ export class LocalBunHost implements Host {
   private readonly loginShell: boolean;
   private readonly terminals?: TerminalManager;
   private readonly getCard?: LocalHostOptions["getCard"];
-  private readonly preparedShellCalls = new WeakMap<Record<string, unknown>, string>();
+  private readonly preparedShellCalls = new WeakMap<Record<string, unknown>, { cwd: string; timeoutMs: number }>();
 
   constructor(opts: LocalHostOptions = {}) {
     this.loginShell = opts.loginShell ?? true;
@@ -126,7 +126,7 @@ export class LocalBunHost implements Host {
   async prepareCall(tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (tool !== "shell.run") return args;
     const prepared = await this.prepareShellArgs(args);
-    this.preparedShellCalls.set(prepared, prepared.cwd as string);
+    this.preparedShellCalls.set(prepared, { cwd: prepared.cwd as string, timeoutMs: prepared.timeoutMs as number });
     return prepared;
   }
 
@@ -154,7 +154,7 @@ export class LocalBunHost implements Host {
           return card ? done({ ok: true, output: JSON.stringify(card) }) : done({ ok: false, error: "找不到这张卡片" });
         }
         case "shell.run": {
-          const prepared = await this.revalidateShellCall(args);
+          const prepared = await this.revalidateShellCall(args, timeoutMs);
           const cmd = prepared.cmd as string;
           const denied = this.scope.deniedCommands.find((d) => cmd.includes(d));
           if (denied) return done({ ok: false, error: `命令包含被禁止的片段「${denied}」` });
@@ -292,7 +292,7 @@ export class LocalBunHost implements Host {
     return this.canonicalPath(path, await this.canonicalAllowedDirs());
   }
 
-  private async prepareShellArgs(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async prepareShellArgs(args: Record<string, unknown>, defaultTimeoutMs = 60_000): Promise<Record<string, unknown>> {
     const accepted = new Set(["cmd", "cwd", "timeoutMs", "stdin"]);
     const unknown = Object.keys(args).find((key) => !accepted.has(key));
     if (unknown) throw new Error(`shell.run 不支持参数 ${unknown}`);
@@ -300,7 +300,7 @@ export class LocalBunHost implements Host {
     if (args.cwd !== undefined && typeof args.cwd !== "string") throw new Error("shell.run 的 cwd 必须是字符串");
     if (args.stdin !== undefined && typeof args.stdin !== "string") throw new Error("shell.run 的 stdin 必须是字符串");
 
-    const timeoutMs = args.timeoutMs === undefined ? 60_000 : args.timeoutMs;
+    const timeoutMs = args.timeoutMs === undefined ? defaultTimeoutMs : args.timeoutMs;
     if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || !Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
       throw new Error("shell.run 的 timeoutMs 必须是 1 到 120000 之间的正整数");
     }
@@ -318,12 +318,15 @@ export class LocalBunHost implements Host {
     };
   }
 
-  private async revalidateShellCall(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const preparedCwd = this.preparedShellCalls.get(args);
-    const normalized = await this.prepareShellArgs(args);
-    if (preparedCwd !== undefined && (args.cwd !== preparedCwd || normalized.cwd !== preparedCwd)) {
+  private async revalidateShellCall(args: Record<string, unknown>, callTimeoutMs: number): Promise<Record<string, unknown>> {
+    const approved = this.preparedShellCalls.get(args);
+    if (approved && args.cwd !== approved.cwd) {
       throw new Error("已审批的工作目录已改变，请重新确认");
     }
+    if (approved && args.timeoutMs !== approved.timeoutMs) throw new Error("已审批的超时时间已改变，请重新确认");
+    const normalized = await this.prepareShellArgs(args, approved?.timeoutMs ?? callTimeoutMs);
+    if (approved && normalized.cwd !== approved.cwd) throw new Error("已审批的工作目录已改变，请重新确认");
+    if (approved && normalized.timeoutMs !== approved.timeoutMs) throw new Error("已审批的超时时间已改变，请重新确认");
     return normalized;
   }
 

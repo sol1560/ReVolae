@@ -33,6 +33,20 @@ describe("agent loop（mock 模型 + 本地宿主）", () => {
     expect(describeAction(shortcutTool, shortcutArgs).detail).toBe(`shortcuts.run\n${JSON.stringify(shortcutArgs, null, 2)}`);
   });
 
+  test("没有 cwd 的 shell 审批仍绑定 stdin 和 timeout", () => {
+    const shellTool = { name: "shell.run", description: "", channel: "shell" as const, staticLevel: 1 as const, costClass: 0 as const, dataLeavesDevice: true, inputSchema: {} };
+    const args = { cmd: "cat", stdin: "first input", timeoutMs: 12_000 };
+    const action = describeAction(shellTool, args);
+    const changedAction = describeAction(shellTool, { ...args, stdin: "different input" });
+    const challengeArgs = { runId: "no-cwd-shell", stepId: "s1", nonce: "fixed-nonce", expiresAt: 1234 };
+    expect(action.detail).toBe(`shell.run\n${JSON.stringify(args, null, 2)}`);
+    expect(action.targetPath).toBeUndefined();
+    expect(changedAction.detail).not.toBe(action.detail);
+    expect(approvalChallenge({ ...challengeArgs, actionDetail: changedAction.detail })).not.toBe(
+      approvalChallenge({ ...challengeArgs, actionDetail: action.detail }),
+    );
+  });
+
   test("放手档：一步 shell 直接执行并回传输出", async () => {
     const { deps, events } = setup("handsoff");
     const out = await runIntent(deps, { deviceId: "d", intent: "shell: echo hello-loop", mode: "agent" });
