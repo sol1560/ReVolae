@@ -98,8 +98,10 @@ struct ApprovalGrantLedger {
         case "shell.run":
             guard action.channel == .shell,
                   case .string(let command) = call.args["cmd"],
-                  action.detail == command,
-                  action.targetPath == stringValue(call.args["cwd"]),
+                  case .string(let cwd) = call.args["cwd"],
+                  !cwd.isEmpty,
+                  action.detail == shellApprovalDetail(command: command, cwd: cwd),
+                  action.targetPath == cwd,
                   action.targetApp == nil else { return false }
             return Set(call.args.keys).isSubset(of: ["cmd", "cwd"])
         case "applescript.run":
@@ -120,8 +122,4 @@ struct ApprovalGrantLedger {
         }
     }
 
-    private static func stringValue(_ value: JSONValue?) -> String? {
-        guard case .string(let string) = value else { return nil }
-        return string
-    }
 }

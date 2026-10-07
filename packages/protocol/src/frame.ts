@@ -124,6 +124,10 @@ export function approvalChallenge(p: {
   return ["cuaremote-approval-v1", p.runId, p.stepId, sha256Hex(p.actionDetail), p.nonce, String(p.expiresAt)].join("\n");
 }
 
+export function shellApprovalDetail(command: string, cwd: string): string {
+  return `shell.run\ncwd[${enc.encode(cwd).byteLength}]:${cwd}\n${command}`;
+}
+
 /**
  * 开终端（L2）的 challenge：没有 run/step，手机自己选 nonce 和 expiresAt，设备按同样规则重建后验签。
  * 签名内容仍是 approvalSignedPayload(challenge, true)，手机端和审批共用一套 Face ID 签名流程。

@@ -149,7 +149,11 @@ final class MacDaemonSafetyTests: XCTestCase {
             let now = 1_000
             let output = workspace.appendingPathComponent("approved.txt")
             let command = "printf approved > \(output.path)"
-            let request = makeRequest(now: now, detail: command, targetPath: workspace.path)
+            let request = makeRequest(
+                now: now,
+                detail: shellApprovalDetail(command: command, cwd: workspace.path),
+                targetPath: workspace.path
+            )
             let decision = try ApprovalSigning.signDecision(for: request, allow: true, identity: phone, now: now)
             var ledger = ApprovalGrantLedger()
             try ledger.stage(request, from: phone.deviceId, now: now)
@@ -168,6 +172,68 @@ final class MacDaemonSafetyTests: XCTestCase {
             XCTAssertEqual(try String(contentsOf: output, encoding: .utf8), "approved")
             XCTAssertFalse(ledger.consumeGrant(for: call, runId: request.runId, peerId: phone.deviceId, now: now))
         }
+    }
+
+    func testShellDescriptorAdvertisesCanonicalDefaultAndHostRequiresCwd() async throws {
+        try await withWorkspace { workspace in
+            let executor = WorkspaceToolExecutor(workspaceURL: workspace)
+            let descriptor = try XCTUnwrap(executor.descriptors.first { $0.name == "shell.run" })
+            guard case .object(let properties) = descriptor.inputSchema["properties"],
+                  case .object(let cwdSchema) = properties["cwd"],
+                  case .string(let defaultCwd) = cwdSchema["default"] else {
+                XCTFail("shell.run must advertise a string cwd default")
+                return
+            }
+            XCTAssertEqual(defaultCwd, executor.workspaceURL.path)
+
+            let missingCwd = ToolsCall(id: "result", callId: "call", tool: "shell.run", args: ["cmd": .string("pwd")])
+            let result = await executor.execute(missingCwd, cancellation: RunCancellation())
+            XCTAssertFalse(result.ok)
+            XCTAssertEqual(result.error, "unsupported or malformed tool arguments")
+        }
+    }
+
+    func testShellGrantRequiresMatchingExplicitCwdAndBoundDetail() throws {
+        let phone = try DeviceIdentityRepository(store: MemoryStore()).loadOrCreate()
+        let owner = TrustedPeer(deviceId: phone.deviceId, name: "iPhone", pubKeys: try phone.publicKeys)
+        let now = 1_500
+        let command = "printf approved"
+        let cwd = "/tmp/cua-workspace"
+        let detail = shellApprovalDetail(command: command, cwd: cwd)
+        let request = makeRequest(now: now, detail: detail, targetPath: cwd)
+        var ledger = ApprovalGrantLedger()
+        try ledger.stage(request, from: phone.deviceId, now: now)
+        let decision = try ApprovalSigning.signDecision(for: request, allow: true, identity: phone, now: now)
+        XCTAssertTrue(try ledger.authorize(decision, from: phone.deviceId, owner: owner, now: now))
+
+        XCTAssertFalse(ledger.consumeGrant(for: shellCall(command), runId: request.runId, peerId: phone.deviceId, now: now))
+        let wrongCwd = ToolsCall(
+            id: "result",
+            callId: "call",
+            tool: "shell.run",
+            args: ["cmd": .string(command), "cwd": .string("/tmp/other-workspace")]
+        )
+        XCTAssertFalse(ledger.consumeGrant(for: wrongCwd, runId: request.runId, peerId: phone.deviceId, now: now))
+        let matchingCwd = ToolsCall(
+            id: "result",
+            callId: "call",
+            tool: "shell.run",
+            args: ["cmd": .string(command), "cwd": .string(cwd)]
+        )
+        XCTAssertTrue(ledger.consumeGrant(for: matchingCwd, runId: request.runId, peerId: phone.deviceId, now: now))
+        XCTAssertFalse(ledger.consumeGrant(for: matchingCwd, runId: request.runId, peerId: phone.deviceId, now: now))
+
+        let legacyRequest = makeRequest(now: now, detail: command, targetPath: cwd, runId: "run-legacy-detail")
+        try ledger.stage(legacyRequest, from: phone.deviceId, now: now)
+        let legacyDecision = try ApprovalSigning.signDecision(for: legacyRequest, allow: true, identity: phone, now: now)
+        XCTAssertTrue(try ledger.authorize(legacyDecision, from: phone.deviceId, owner: owner, now: now))
+        XCTAssertFalse(ledger.consumeGrant(for: matchingCwd, runId: legacyRequest.runId, peerId: phone.deviceId, now: now))
+
+        let missingTargetRequest = makeRequest(now: now, detail: detail, runId: "run-missing-target")
+        try ledger.stage(missingTargetRequest, from: phone.deviceId, now: now)
+        let missingTargetDecision = try ApprovalSigning.signDecision(for: missingTargetRequest, allow: true, identity: phone, now: now)
+        XCTAssertTrue(try ledger.authorize(missingTargetDecision, from: phone.deviceId, owner: owner, now: now))
+        XCTAssertFalse(ledger.consumeGrant(for: matchingCwd, runId: missingTargetRequest.runId, peerId: phone.deviceId, now: now))
     }
 
     func testDenyExpiryReplayAndForeignSignerDoNotGrantExecution() throws {

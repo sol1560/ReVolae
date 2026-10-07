@@ -69,6 +69,8 @@ HPKE `info` 是 UTF-8 `cuaremote-link-v2\n<from>\n<to>\n<senderNonce>\n<receiver
 
 `challenge = approvalChallenge({runId, stepId, actionDetail, nonce, expiresAt})`，两端实现见 `frame.ts` / `Frame.swift`，测试向量在 `swift/Tests/.../fixtures/binary.json`；两种算法的签名向量（固定私钥、确定性签名）在 `fixtures/approval.json`。
 
+原生 Mac `shell.run` 会将宿主公布的绝对 workspace 默认值补入缺省 `cwd`，并将最终有效目录按 UTF-8 字节长度写入 `shellApprovalDetail(command, cwd)`；该详情参与现有 approval-v1 challenge 的签名摘要。
+
 ## 端到端加密
 
 HPKE（RFC 9180）：DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + ChaCha20-Poly1305，Auth 模式（发送方用自己的 X25519 静态私钥认证）。每个方向一个上下文，`info = "cuaremote-v1|" + from + "|" + to`，每帧 `seal(aad = RelayEnvelope 头部字节, pt = Frame 字节)`。会话建立：先发 `enc`（32 字节）作为第一帧 body，之后都是密文。TS 实现在 `apps/hub`/`packages/brain` 共用的 `packages/protocol/src/hpke.ts`（`E2ELink`：`handshake()` 出握手帧，`sealFrame()` / `openRelay()` 收发；拒绝路由不符、重复握手、未握手密文），Swift 用 CryptoKit `HPKE.Sender(recipientKey:ciphersuite:info:authenticatedBy:)` / `HPKE.Recipient(...)`，ciphersuite `.Curve25519_HKDF_SHA256_ChachaPoly`。互通向量 `fixtures/hpke.json`（密钥由 `DeriveKeyPair(ikm)` 派生、enc 由固定 ekm 派生、含 aad 与两帧密文和 exporter），RFC 9180 A.2.3 官方向量 `fixtures/rfc9180-a2-3.json`，都由 `bun run gen:fixtures` 复制到 Swift 测试目录。

@@ -156,6 +156,7 @@ final class MacDaemonIntegrationTests: XCTestCase {
             provider: provider,
             modelCredentialEnvironment: ["HOME": home.path]
         )
+        let effectiveWorkspace = configuration.workspaceURL
         let journalURL = testRoot.appendingPathComponent("journal/runs.json")
         var daemon = try MacDaemon(client: device, configuration: configuration, journalURL: journalURL)
         let recorder = EventRecorder()
@@ -180,8 +181,8 @@ final class MacDaemonIntegrationTests: XCTestCase {
         }
 
         let approvedCommand = "printf allow > allow.txt"
-        try await submit("allow", id: "submit-allow", workspace: workspace, phone: phone, deviceId: device.identity.deviceId)
-        let allowRequest = try await waitForApproval(approvedCommand, recorder: recorder)
+        try await submit("allow", id: "submit-allow", workspace: effectiveWorkspace, phone: phone, deviceId: device.identity.deviceId)
+        let allowRequest = try await waitForApproval(approvedCommand, cwd: effectiveWorkspace.path, recorder: recorder)
         let allowDecision = try ApprovalSigning.signDecision(for: allowRequest, allow: true, identity: phone.identity)
         try await phone.send(.approvalDecision(allowDecision), to: device.identity.deviceId)
         try await waitForStatus(.completed, submitId: "submit-allow", daemon: daemon)
@@ -190,21 +191,21 @@ final class MacDaemonIntegrationTests: XCTestCase {
         XCTAssertTrue(fixtureState.toolResults.contains { $0.contains("daemon scoped read marker") })
 
         let deniedCommand = "printf deny > deny.txt"
-        try await submit("deny", id: "submit-deny", workspace: workspace, phone: phone, deviceId: device.identity.deviceId)
-        let denyRequest = try await waitForApproval(deniedCommand, recorder: recorder)
+        try await submit("deny", id: "submit-deny", workspace: effectiveWorkspace, phone: phone, deviceId: device.identity.deviceId)
+        let denyRequest = try await waitForApproval(deniedCommand, cwd: effectiveWorkspace.path, recorder: recorder)
         let denyDecision = try ApprovalSigning.signDecision(for: denyRequest, allow: false, identity: phone.identity)
         try await phone.send(.approvalDecision(denyDecision), to: device.identity.deviceId)
         try await waitForStatus(.failed, submitId: "submit-deny", daemon: daemon)
         XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("deny.txt").path))
 
-        try await submit("cancel", id: "submit-cancel", workspace: workspace, phone: phone, deviceId: device.identity.deviceId)
-        let cancelRequest = try await waitForApproval("printf cancel > cancel.txt", recorder: recorder)
+        try await submit("cancel", id: "submit-cancel", workspace: effectiveWorkspace, phone: phone, deviceId: device.identity.deviceId)
+        let cancelRequest = try await waitForApproval("printf cancel > cancel.txt", cwd: effectiveWorkspace.path, recorder: recorder)
         try await phone.send(.runCancel(RunCancel(id: "cancel-request", runId: cancelRequest.runId)), to: device.identity.deviceId)
         try await waitForStatus(.cancelled, submitId: "submit-cancel", daemon: daemon)
         XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("cancel.txt").path))
 
-        try await submit("disconnect", id: "submit-disconnect", workspace: workspace, phone: phone, deviceId: device.identity.deviceId)
-        _ = try await waitForApproval("printf disconnect > disconnect.txt", recorder: recorder)
+        try await submit("disconnect", id: "submit-disconnect", workspace: effectiveWorkspace, phone: phone, deviceId: device.identity.deviceId)
+        _ = try await waitForApproval("printf disconnect > disconnect.txt", cwd: effectiveWorkspace.path, recorder: recorder)
         phone.disconnect()
         try await waitForStatus(.interrupted, submitId: "submit-disconnect", daemon: daemon)
         XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("disconnect.txt").path))
@@ -214,8 +215,8 @@ final class MacDaemonIntegrationTests: XCTestCase {
             device.peers[phone.identity.deviceId]?.ready == true
                 && phone.peers[device.identity.deviceId]?.ready == true
         }
-        try await submit("restart", id: "submit-restart", workspace: workspace, phone: phone, deviceId: device.identity.deviceId)
-        let restartRequest = try await waitForApproval("printf restart > restart.txt", recorder: recorder)
+        try await submit("restart", id: "submit-restart", workspace: effectiveWorkspace, phone: phone, deviceId: device.identity.deviceId)
+        let restartRequest = try await waitForApproval("printf restart > restart.txt", cwd: effectiveWorkspace.path, recorder: recorder)
         daemon.disconnect()
         try await waitForStatus(.interrupted, submitId: "submit-restart", daemon: daemon)
 
@@ -228,7 +229,7 @@ final class MacDaemonIntegrationTests: XCTestCase {
         try await phone.send(
             .intentSubmit(IntentSubmit(
                 id: "submit-restart",
-                text: "scenario:restart workspace=\(workspace.path)",
+                text: "scenario:restart workspace=\(effectiveWorkspace.path)",
                 deviceId: device.identity.deviceId,
                 mode: .agent
             )),
@@ -300,17 +301,20 @@ final class MacDaemonIntegrationTests: XCTestCase {
         )
     }
 
-    private func waitForApproval(_ detail: String, recorder: EventRecorder) async throws -> StepApprovalRequired {
+    private func waitForApproval(_ command: String, cwd: String, recorder: EventRecorder) async throws -> StepApprovalRequired {
+        let expectedDetail = shellApprovalDetail(command: command, cwd: cwd)
         try await waitUntil {
             recorder.messages.contains {
-                if case .stepApprovalRequired(let request) = $0 { return request.action.detail == detail }
+                if case .stepApprovalRequired(let request) = $0 {
+                    return request.action.detail == expectedDetail && request.action.targetPath == cwd
+                }
                 return false
             }
         }
         return try XCTUnwrap(recorder.messages.compactMap {
             if case .stepApprovalRequired(let request) = $0 { return request }
             return nil
-        }.first(where: { $0.action.detail == detail }))
+        }.first(where: { $0.action.detail == expectedDetail && $0.action.targetPath == cwd }))
     }
 
     private func waitForStatus(_ status: MacRunStatus, submitId: String, daemon: MacDaemon) async throws {

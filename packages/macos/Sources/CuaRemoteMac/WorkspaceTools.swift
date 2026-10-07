@@ -51,7 +51,10 @@ final class WorkspaceToolExecutor: @unchecked Sendable {
             descriptor("fs.list", "List a bounded directory tree inside the selected workspace.", .fs, .l0,
                       properties: ["path": stringSchema, "depth": integerSchema], required: ["path"]),
             descriptor("shell.run", "Execute an approved shell command with the signed command and workspace path.", .shell, .l2,
-                      properties: ["cmd": stringSchema, "cwd": stringSchema], required: ["cmd"]),
+                      properties: [
+                        "cmd": stringSchema,
+                        "cwd": .object(["type": .string("string"), "default": .string(workspaceURL.path)]),
+                      ], required: ["cmd", "cwd"]),
             descriptor("applescript.run", "Execute an approved AppleScript using the user's macOS Automation permissions.", .applescript, .l2,
                       properties: ["script": stringSchema], required: ["script"]),
             descriptor("shortcuts.run", "Run an approved existing macOS Shortcut by its literal name.", .shortcuts, .l2,
@@ -213,8 +216,7 @@ final class WorkspaceToolExecutor: @unchecked Sendable {
     }
 
     private func requestedDirectory(_ value: JSONValue?) throws -> URL {
-        guard let value else { return workspaceURL }
-        guard case .string(let path) = value else { throw ToolExecutionError.invalidArguments }
+        guard case .string(let path) = value, !path.isEmpty else { throw ToolExecutionError.invalidArguments }
         return try canonicalWorkspacePath(path)
     }
 

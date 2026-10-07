@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
-import { approvalChallenge, approvalSignedPayload, controlFrame, encodeMediaFrame, encodeRelay, terminalOpenChallenge } from "../src/index.js";
+import { approvalChallenge, approvalSignedPayload, controlFrame, encodeMediaFrame, encodeRelay, shellApprovalDetail, terminalOpenChallenge } from "../src/index.js";
 import { E2ELink, SealContext, deriveKemKeyPair, hex, relayHeader, sessionInfo } from "../src/hpke.js";
 import { freshLinkInfo } from "../src/fresh-link.js";
 import { signApproval, signPayload } from "../src/approval.js";
@@ -146,6 +146,21 @@ writeFileSync(join(tsDir, "approval.json"), JSON.stringify({
   },
 }, null, 2));
 
+const shellApproval = {
+  command: "printf fixture",
+  cwd: "/tmp/工作\n区",
+  detail: "shell.run\ncwd[15]:/tmp/工作\n区\nprintf fixture",
+  changedCwd: "/tmp/工作/区",
+  changedCwdDetail: "shell.run\ncwd[15]:/tmp/工作/区\nprintf fixture",
+};
+if (
+  shellApprovalDetail(shellApproval.command, shellApproval.cwd) !== shellApproval.detail
+  || shellApprovalDetail(shellApproval.command, shellApproval.changedCwd) !== shellApproval.changedCwdDetail
+) {
+  throw new Error("shell approval detail does not match the fixed UTF-8 fixture");
+}
+writeFileSync(join(tsDir, "shell-approval.json"), JSON.stringify(shellApproval, null, 2));
+
 const pairingVector = {
   secret: Buffer.from("00112233445566778899aabbccddeeff", "hex").toString("base64"),
   deviceKem: Buffer.from("11".repeat(32), "hex").toString("base64"),
@@ -156,7 +171,7 @@ writeFileSync(join(tsDir, "pairing.json"), JSON.stringify({
   hmac: pairHmac(pairingVector.secret, pairingVector.deviceKem, pairingVector.phoneKem),
 }, null, 2));
 
-for (const f of ["hpke.json", "approval.json", "fresh-link.json", "pairing.json", "rfc9180-a2-3.json"]) {
+for (const f of ["hpke.json", "approval.json", "shell-approval.json", "fresh-link.json", "pairing.json", "rfc9180-a2-3.json"]) {
   copyFileSync(join(tsDir, f), join(swiftDir, f));
 }
 copyFileSync(join(tsDir, "pairing.json"), join(appleDir, "pairing.json"));

@@ -41,6 +41,7 @@ Journal 位于 Application Support，使用受限目录/文件权限和原子替
 
 - `fs.read` 和 `fs.list` 会规范化符号链接，只允许访问所选 workspace 内的路径；读取大小、目录深度、条目数和协议输出均有限制，并会在文件操作前检查取消状态。
 - `shell.run`、`applescript.run` 和 `shortcuts.run` 始终是静态 L2，必须经过签名、单次使用的审批；授权与活动 run 及精确操作详情/目标路径绑定。未声明的参数会被拒绝。
+- Brain 会将缺省 `cwd` 补为宿主公布的所选 workspace 规范路径，并把最终有效 `cwd` 按 UTF-8 字节长度编码进签名审批详情。
 - Shell、AppleScript 和 Shortcuts 以登录用户的完整账户权限执行。workspace 只是工作目录，**不是**沙箱。Shell 使用 `/bin/sh -c`；AppleScript 使用 `/usr/bin/osascript -e` 并将脚本作为字面参数传入；Shortcuts 使用 `/usr/bin/shortcuts run` 并将名称作为字面参数传入。工具子进程只继承明确允许的基本环境变量，不继承宿主的任意环境变量。
 - 首个 GUI 场景可以使用经明确审批的 AppleScript/System Events，但前提是用户已授予所需的 Automation 与 Accessibility 权限。没有自动或盲目的 CUA 回退。
 

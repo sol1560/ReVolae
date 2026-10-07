@@ -109,6 +109,7 @@ struct PhoneRootView: View {
                     }
                     NoticeView(text: session.notice)
                     TextField("希望 Mac 做什么？例如：列出工作目录中的文件", text: $intent, axis: .vertical)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .lineLimit(3...8).padding().background(.quaternary, in: RoundedRectangle(cornerRadius: 16))
                         .accessibilityIdentifier("intent-input")
                     HStack {

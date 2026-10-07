@@ -110,6 +110,10 @@ public func approvalChallenge(runId: String, stepId: String, actionDetail: Strin
     return ["cuaremote-approval-v1", runId, stepId, digest, nonce, String(expiresAt)].joined(separator: "\n")
 }
 
+public func shellApprovalDetail(command: String, cwd: String) -> String {
+    "shell.run\ncwd[\(cwd.utf8.count)]:\(cwd)\n\(command)"
+}
+
 public func approvalSignedPayload(_ challenge: String, allow: Bool) -> String {
     challenge + "\n" + (allow ? "allow" : "deny")
 }

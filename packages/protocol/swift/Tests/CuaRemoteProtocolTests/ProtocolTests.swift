@@ -33,6 +33,24 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(approvalChallenge(runId: "r1", stepId: "s1", actionDetail: "rm -rf ~/x", nonce: "n0", expiresAt: 1700000000), b.challenge)
     }
 
+    func testShellApprovalDetailMatchesUTF8FixtureAndBindsChangedCwd() throws {
+        struct ShellApproval: Decodable {
+            let command: String
+            let cwd: String
+            let detail: String
+            let changedCwd: String
+            let changedCwdDetail: String
+        }
+        let vector = try JSONDecoder().decode(ShellApproval.self, from: fixture("shell-approval"))
+        XCTAssertEqual(shellApprovalDetail(command: vector.command, cwd: vector.cwd), vector.detail)
+        XCTAssertEqual(shellApprovalDetail(command: vector.command, cwd: vector.changedCwd), vector.changedCwdDetail)
+        XCTAssertNotEqual(vector.changedCwdDetail, vector.detail)
+        XCTAssertNotEqual(
+            approvalChallenge(runId: "r", stepId: "s", actionDetail: vector.changedCwdDetail, nonce: "n", expiresAt: 10),
+            approvalChallenge(runId: "r", stepId: "s", actionDetail: vector.detail, nonce: "n", expiresAt: 10)
+        )
+    }
+
     func testLevelComparable() {
         XCTAssertTrue(Level.l0 < Level.l2)
         XCTAssertEqual(max(Level.l1, Level.l0), .l1)
