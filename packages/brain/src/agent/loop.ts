@@ -74,10 +74,10 @@ const BLOCK_OUTPUT_CHARS = 1500;
 interface BlockSummary { blockId?: number; state?: string; command?: string; cwd?: string; exitCode?: number; output?: string }
 
 /** 把 terminal.blocks 的结果整理成一段给模型看的文字；宿主没返回有效内容时给 undefined */
-export async function recentBlocksContext(host: Host, sessionId: string): Promise<string | undefined> {
+export async function recentBlocksContext(host: Host, sessionId: string, signal?: AbortSignal): Promise<string | undefined> {
   let res: ToolResult;
   try {
-    res = await host.call(TERMINAL_BLOCKS_TOOL, { sessionId, limit: RECENT_BLOCKS }, 3000);
+    res = await host.call(TERMINAL_BLOCKS_TOOL, { sessionId, limit: RECENT_BLOCKS }, 3000, signal);
   } catch {
     return undefined;
   }
@@ -136,7 +136,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   ];
   // 终端模式：宿主如果会分块（shell 集成 + terminal.blocks 工具），先把最近几条命令和输出喂给模型
   if (input.mode === "terminal" && input.terminalSessionId && byName.has(TERMINAL_BLOCKS_TOOL)) {
-    const ctx = await recentBlocksContext(deps.host, input.terminalSessionId);
+    const ctx = await recentBlocksContext(deps.host, input.terminalSessionId, deps.signal);
     if (ctx) messages.push({ role: "user", content: [{ type: "text", text: ctx }] });
   }
   messages.push({ role: "user", content: [{ type: "text", text: `意图：${input.intent}` }] });
@@ -150,7 +150,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   const finish = (ok: boolean, summary: string, status: RunStatus = ok ? "succeeded" : "failed"): RunOutcome => {
     const cancelled = deps.signal?.aborted ?? false;
     const out: RunOutcome = { runId, ok: ok && !cancelled, status: cancelled ? "cancelled" : status,
-      summary: cancelled ? "任务已取消" : summary, cost: { ...cost }, stepCount, cancelled };
+      summary: cancelled ? "任务已取消；已完成的操作不会自动回滚" : summary, cost: { ...cost }, stepCount, cancelled };
     deps.emit({ type: "run.finished", ...out });
     deps.log?.({ t: "run.finished", ...out });
     return out;
@@ -223,29 +223,57 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: `没有工具 ${call.name}` }] });
       continue;
     }
-    const step = plan[planCursor] && plan[planCursor]!.status === "pending" ? plan[planCursor]! : appendStep(plan, tool.channel, describe(tool, call.args).summary);
+    const pendingStep = plan[planCursor] && plan[planCursor]!.status === "pending" ? plan[planCursor]! : undefined;
+    const t0 = Date.now();
+    let args: Record<string, unknown>;
+    try {
+      args = deps.host.prepareCall ? await deps.host.prepareCall(tool.name, call.args) : call.args;
+    } catch (e) {
+      if (deps.signal?.aborted) return finish(false, "任务已取消");
+      const step = pendingStep ?? appendStep(plan, tool.channel, tool.name);
+      step.status = "failed";
+      stepCount++;
+      const error = e instanceof Error ? e.message : String(e);
+      deps.emit({ type: "step.started", runId, stepId: step.id, title: step.title, channel: tool.channel });
+      deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error });
+      deps.emit({ type: "plan.updated", runId, plan: [...plan] });
+      return finish(false, `工具参数准备失败：${error}`);
+    }
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
+
+    const action = describe(tool, args);
+    const step = pendingStep ?? appendStep(plan, tool.channel, action.summary);
     const stepIdx = plan.indexOf(step);
     step.status = "running";
     stepCount++;
-    const t0 = Date.now();
-    const action = describe(tool, call.args);
     deps.emit({ type: "step.started", runId, stepId: step.id, title: step.title, channel: tool.channel });
 
-    const decision = await deps.policy.decide({ intent: input.intent, tool, args: call.args, action, scope, recent });
+    const decision = await deps.policy.decide({ intent: input.intent, tool, args, action, scope, recent });
     cost.jevTokens += decision.jevTokens;
     cost.usd += decision.jevUsd;
     deps.emit({ type: "step.precheck", runId, stepId: step.id, staticLevel: decision.staticLevel, level: decision.level, intentMatch: decision.intentMatch, risk: decision.risk, confidence: decision.confidence, jevMs: decision.jevMs, verdict: decision.verdict, source: decision.source });
     deps.log?.({ t: "step.precheck", runId, stepId: step.id, tool: tool.name, ...decision });
 
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
     let verdict = decision.verdict;
+    let approvalExpiresAt: number | undefined;
+    const failExpiredApproval = () => {
+      const error = "确认已过期，未执行";
+      step.status = "failed";
+      deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error });
+      deps.emit({ type: "plan.updated", runId, plan: [...plan] });
+      return finish(false, error, "failed");
+    };
     if (verdict === "confirm") {
       step.status = "awaiting_approval";
       const nonce = randomUUID();
       const expiresAt = Math.floor(Date.now() / 1000) + ttl;
+      approvalExpiresAt = expiresAt;
       const challenge = approvalChallenge({ runId, stepId: step.id, actionDetail: action.detail, nonce, expiresAt });
       deps.emit({ type: "step.approval_required", runId, stepId: step.id, level: decision.level, action, reason: decision.reason, expiresAt, challenge });
       const a = await deps.approvals.request({ runId, stepId: step.id, level: decision.level, action, reason: decision.reason, challenge, expiresAt });
       if (deps.signal?.aborted) return finish(false, "任务已取消");
+      if (a.allow && Date.now() / 1000 >= expiresAt) return failExpiredApproval();
       if (a.allow && a.remember === "always" && decision.level < 2) deps.policy.remember(action);
       verdict = a.allow ? "allow" : "deny";
       if (!a.allow) {
@@ -265,12 +293,13 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
     }
 
     if (deps.signal?.aborted) return finish(false, "任务已取消");
+    if (approvalExpiresAt !== undefined && Date.now() / 1000 >= approvalExpiresAt) return failExpiredApproval();
 
     // 执行
     let result: ToolResult;
-    if (tool.name === "gui.act") result = await guiAct(deps, input.intent, call.args, recent, cost);
-    else if (tool.name.startsWith("gui.") && deps.gui) result = await deps.gui.call(tool.name, call.args);
-    else result = await deps.host.call(tool.name, call.args);
+    if (tool.name === "gui.act") result = await guiAct(deps, input.intent, args, recent, cost);
+    else if (tool.name.startsWith("gui.") && deps.gui) result = await deps.gui.call(tool.name, args);
+    else result = await deps.host.call(tool.name, args, undefined, deps.signal);
 
     step.status = result.ok ? "done" : "failed";
     const dataLeft = tool.dataLeavesDevice && deps.provider.info.tier !== "local";
@@ -342,12 +371,22 @@ export function describe(tool: ToolDescriptor, args: Record<string, unknown>): C
   const s = (v: unknown) => (v === undefined ? "" : String(v));
   switch (tool.name) {
     case "shell.run":
-      return { channel: "shell", summary: `运行命令 ${s(args.cmd).slice(0, 60)}`, detail: s(args.cmd), targetPath: args.cwd ? s(args.cwd) : undefined };
+      return {
+        channel: "shell",
+        summary: `运行命令 ${s(args.cmd).slice(0, 60)}`,
+        detail: `shell.run\n${JSON.stringify(args, null, 2)}`,
+        targetPath: args.cwd === undefined ? undefined : s(args.cwd),
+      };
     case "applescript.run":
     case "jxa.run":
-      return { channel: tool.channel, summary: `运行脚本（${tool.name === "jxa.run" ? "JXA" : "AppleScript"}）`, detail: s(args.script), targetApp: /tell application "([^"]+)"/.exec(s(args.script))?.[1] };
+      return {
+        channel: tool.channel,
+        summary: `运行脚本（${tool.name === "jxa.run" ? "JXA" : "AppleScript"}）`,
+        detail: `${tool.name}\n${JSON.stringify(args, null, 2)}`,
+        targetApp: /tell application "([^"]+)"/.exec(s(args.script))?.[1],
+      };
     case "shortcuts.run":
-      return { channel: "shortcuts", summary: `运行快捷指令「${s(args.name)}」`, detail: `shortcuts run ${s(args.name)}` };
+      return { channel: "shortcuts", summary: `运行快捷指令「${s(args.name)}」`, detail: `${tool.name}\n${JSON.stringify(args, null, 2)}` };
     case "fs.list":
     case "fs.read":
       return { channel: "fs", summary: `${tool.name === "fs.list" ? "列目录" : "读文件"} ${s(args.path)}`, detail: `${tool.name} ${s(args.path)}`, targetPath: s(args.path) };

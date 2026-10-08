@@ -48,6 +48,9 @@ CuaRemote 让一台手机对另一台设备发号施令，所以默认假设：h
 ## 作用域与会话
 
 - daemon 上可以限定允许的目录、应用、禁止的命令片段；不在范围内的操作在预检第 2 步直接拒绝。
+- Mac Brain 的 shell 默认 cwd 是首个允许目录的 canonical realpath；相对 cwd 在该目录下解析，shell 与 `fs.read`/`fs.list` 都会验证 canonical realpath 是否仍在允许范围内。shell 的有效 cwd、timeoutMs（默认 60 秒，最大 120 秒）和 stdin（若有）会一起绑定进审批详情。realpath 检查不是 OS 沙箱，也无法消除检查与使用之间的 TOCTOU 竞态。
+- shell 命令仍以当前登录用户的完整权限运行；cwd 只是起始目录，不是权限围栏。策略要求审批的命令不会因 cwd 白名单而变成沙箱命令。
+- Brain 本地子进程的 stdout/stderr 合计最多保留 1 MiB；取消、超时或输出超限时，POSIX 上在仍能安全确认进程组归属时立即 SIGKILL 进程组。leader 已退出、进程组 ID 可能复用时不再冒险发信号；继承的输出管道只做有界排空。脱离进程组的 daemon/background 子进程不保证回滚；取消也不撤销此前已完成的副作用。
 - hub 会话 token 默认 24 小时；长时间不活跃断开。
 - 终端模式下模型只能看到 L0 工具和「建议命令」，其他工具即使被叫到也不执行。
 - `gui.*` 只放行 cua-driver 白名单里的 19 个工具，浏览器 / 录屏 / 配置类不放。

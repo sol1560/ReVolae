@@ -74,7 +74,7 @@ export async function learnApp(deps: LearnDeps, input: LearnInput): Promise<Lear
   for (const phase of PHASES) {
     deps.signal?.throwIfAborted();
     progress(phase);
-    const r = await deps.host.call(INVENTORY_TOOL, { bundleId: input.bundleId, phase }, 120_000);
+    const r = await deps.host.call(INVENTORY_TOOL, { bundleId: input.bundleId, phase }, 120_000, deps.signal);
     if (!r.ok) {
       deps.log?.({ t: "learn.phase_failed", bundleId: input.bundleId, phase, error: r.error });
       progress(phase, `${phase} 阶段失败：${r.error ?? "未知错误"}`);
@@ -170,7 +170,7 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
   const finish = (ok: boolean, summary: string, extra: { output?: string; error?: string; status?: RunStatus } = {}): RunCardOutcome => {
     const cancelled = deps.signal?.aborted ?? false;
     const status = cancelled ? "cancelled" : extra.status ?? (ok ? "succeeded" : "failed");
-    deps.emit({ type: "run.finished", runId, ok: ok && !cancelled, status, summary: cancelled ? "任务已取消" : summary, cost, stepCount: 1, cancelled });
+    deps.emit({ type: "run.finished", runId, ok: ok && !cancelled, status, summary: cancelled ? "任务已取消；已完成的操作不会自动回滚" : summary, cost, stepCount: 1, cancelled });
     return { runId, cost, ...extra, ok: ok && !cancelled, status };
   };
 
@@ -187,9 +187,20 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
     deps.emit({ type: "error", code: "card_params", message: msg, ref: runId });
     return finish(false, msg, { error: msg });
   }
-  const args = toolArgs(card.action.kind, rendered.text, card);
-  const action = describe(tool, args);
+  const renderedArgs = toolArgs(card.action.kind, rendered.text, card);
   const t0 = Date.now();
+  let args: Record<string, unknown>;
+  try {
+    args = deps.host.prepareCall ? await deps.host.prepareCall(tool.name, renderedArgs) : renderedArgs;
+  } catch (e) {
+    if (deps.signal?.aborted) return finish(false, "任务已取消");
+    const error = e instanceof Error ? e.message : String(e);
+    deps.emit({ type: "step.started", runId, stepId, title: card.name, channel: tool.channel });
+    deps.emit({ type: "step.finished", runId, stepId, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error });
+    return finish(false, `工具参数准备失败：${error}`, { error });
+  }
+  if (deps.signal?.aborted) return finish(false, "任务已取消");
+  const action = describe(tool, args);
   deps.emit({ type: "step.started", runId, stepId, title: card.name, channel: tool.channel });
 
   // 卡片自带的等级是下限：模型说 L2 的卡，静态分级再低也按 L2 走
@@ -202,13 +213,22 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
   deps.emit({ type: "step.precheck", runId, stepId, staticLevel: decision.staticLevel, level, intentMatch: decision.intentMatch, risk: decision.risk, confidence: decision.confidence, jevMs: decision.jevMs, verdict, source: decision.source });
   deps.log?.({ t: "card.precheck", runId, cardId: card.id, tool: tool.name, ...decision, level, verdict });
 
+  if (deps.signal?.aborted) return finish(false, "任务已取消");
+  let approvalExpiresAt: number | undefined;
+  const failExpiredApproval = () => {
+    const error = "确认已过期，未执行";
+    deps.emit({ type: "step.finished", runId, stepId, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error });
+    return finish(false, error, { error, status: "failed" });
+  };
   if (verdict === "confirm") {
     const nonce = randomUUID();
     const expiresAt = Math.floor(Date.now() / 1000) + (deps.limits?.approvalTtlSec ?? 300);
+    approvalExpiresAt = expiresAt;
     const challenge = approvalChallenge({ runId, stepId, actionDetail: action.detail, nonce, expiresAt });
     deps.emit({ type: "step.approval_required", runId, stepId, level, action, reason: decision.reason, expiresAt, challenge });
     const a = await deps.approvals.request({ runId, stepId, level, action, reason: decision.reason, challenge, expiresAt });
     if (deps.signal?.aborted) return finish(false, "任务已取消");
+    if (a.allow && Date.now() / 1000 >= expiresAt) return failExpiredApproval();
     if (a.allow && a.remember === "always" && level < 2) deps.policy.remember(action);
     verdict = a.allow ? "allow" : "deny";
     if (!a.allow) {
@@ -223,7 +243,8 @@ export async function runCard(deps: RunCardDeps, card: CapabilityCard, params: R
   }
 
   if (deps.signal?.aborted) return finish(false, "任务已取消");
-  const result = await deps.host.call(tool.name, args);
+  if (approvalExpiresAt !== undefined && Date.now() / 1000 >= approvalExpiresAt) return failExpiredApproval();
+  const result = await deps.host.call(tool.name, args, undefined, deps.signal);
   deps.emit({ type: "step.finished", runId, stepId, ok: result.ok, ms: Date.now() - t0, channel: tool.channel, cost: { ...cost }, dataLeftDevice: false, output: result.output?.slice(0, 4000), error: result.error });
   deps.log?.({ t: "card.finished", runId, cardId: card.id, ok: result.ok, ms: Date.now() - t0, error: result.error });
   return finish(result.ok, result.ok ? `「${card.name}」完成` : `「${card.name}」失败：${result.error ?? ""}`, { output: result.output, error: result.error });

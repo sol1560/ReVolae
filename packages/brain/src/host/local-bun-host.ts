@@ -1,10 +1,11 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve, join, relative, isAbsolute } from "node:path";
+import { resolve, join, relative, isAbsolute, sep } from "node:path";
 import { AppInventory, type CapabilityCard, type Scope, type ToolDescriptor } from "@cuaremote/protocol";
 import type { Host, ToolResult } from "./types.js";
 import { TERMINAL_BLOCKS_DESCRIPTOR, type TerminalManager } from "../terminal/manager.js";
 import { nativeHelper } from "./native-helper.js";
+import { PROCESS_OUTPUT_LIMIT, runProcess, type ProcessRunResult } from "./process-runner.js";
 
 const isMac = process.platform === "darwin";
 /** 单引号包起来给 sh 用 */
@@ -87,6 +88,7 @@ export class LocalBunHost implements Host {
   private readonly loginShell: boolean;
   private readonly terminals?: TerminalManager;
   private readonly getCard?: LocalHostOptions["getCard"];
+  private readonly preparedShellCalls = new WeakMap<Record<string, unknown>, { cwd: string; timeoutMs: number }>();
 
   constructor(opts: LocalHostOptions = {}) {
     this.loginShell = opts.loginShell ?? true;
@@ -102,27 +104,48 @@ export class LocalBunHost implements Host {
 
   async listTools() {
     const base = isMac ? LOCAL_TOOLS : LOCAL_TOOLS.filter((t) => !["applescript.run", "jxa.run", "shortcuts.run", "shortcuts.list"].includes(t.name));
-    const tools = [...base, ...(this.adb() ? [ADB_TOOL] : []), ...(this.terminals ? [TERMINAL_BLOCKS_DESCRIPTOR] : [])];
+    const allowedDirs = await this.canonicalAllowedDirs();
+    const defaultCwd = allowedDirs[0];
+    const tools: ToolDescriptor[] = base.map((tool) => tool.name !== "shell.run" || !defaultCwd ? tool : {
+      ...tool,
+      inputSchema: {
+        ...tool.inputSchema,
+        properties: {
+          ...(tool.inputSchema.properties as Record<string, unknown>),
+          cwd: { type: "string", default: defaultCwd },
+        },
+        required: ["cmd", "cwd"],
+      },
+    });
+    tools.push(...(this.adb() ? [ADB_TOOL] : []), ...(this.terminals ? [TERMINAL_BLOCKS_DESCRIPTOR] : []));
     if (process.env.CUAREMOTE_NATIVE_HELPER) tools.push({ name: "app.inventory", description: "只读采集指定应用的脚本、菜单、窗口或快捷指令能力。", channel: "app", staticLevel: 0, costClass: 0, dataLeavesDevice: true, inputSchema: { type: "object", properties: { bundleId: { type: "string" }, phase: { type: "string", enum: ["sdef", "menu", "window", "shortcuts"] } }, required: ["bundleId", "phase"] } });
     if (this.getCard) tools.push({ name: "app.card.get", description: "读取已保存的应用操作卡片。", channel: "app", staticLevel: 0, costClass: 0, dataLeavesDevice: true, inputSchema: { type: "object", properties: { cardId: { type: "string" } }, required: ["cardId"] } });
-    return { tools, scope: this.scope };
+    return { tools, scope: { ...this.scope, allowedDirs } };
+  }
+
+  async prepareCall(tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (tool !== "shell.run") return args;
+    const prepared = await this.prepareShellArgs(args);
+    this.preparedShellCalls.set(prepared, { cwd: prepared.cwd as string, timeoutMs: prepared.timeoutMs as number });
+    return prepared;
   }
 
   private adb(): string | undefined {
     return process.env.CUAREMOTE_ADB || Bun.which("adb") || undefined;
   }
 
-  async call(tool: string, args: Record<string, unknown>, timeoutMs = 60_000): Promise<ToolResult> {
+  async call(tool: string, args: Record<string, unknown>, timeoutMs = 60_000, signal?: AbortSignal): Promise<ToolResult> {
     const t0 = Date.now();
     const done = (r: Omit<ToolResult, "ms" | "attachments"> & Partial<Pick<ToolResult, "attachments">>): ToolResult => ({ attachments: [], ...r, ms: Date.now() - t0 });
     try {
+      signal?.throwIfAborted();
       switch (tool) {
         case "app.inventory": {
           const phase = String(args.phase);
           if (!["sdef", "menu", "window", "shortcuts"].includes(phase)) return done({ ok: false, error: "不支持的只读采集阶段" });
           const bundleId = String(args.bundleId);
           if (this.scope.allowedApps.length && !this.scope.allowedApps.includes(bundleId)) return done({ ok: false, error: "应用不在允许范围内" });
-          const inventory = await nativeHelper(["inventory", bundleId, phase], AppInventory, timeoutMs);
+          const inventory = await nativeHelper(["inventory", bundleId, phase], AppInventory, timeoutMs, signal);
           if (inventory.bundleId !== bundleId || inventory.phase !== phase) return done({ ok: false, error: "应用采集结果与请求不匹配" });
           return done({ ok: true, output: JSON.stringify(inventory) });
         }
@@ -131,39 +154,65 @@ export class LocalBunHost implements Host {
           return card ? done({ ok: true, output: JSON.stringify(card) }) : done({ ok: false, error: "找不到这张卡片" });
         }
         case "shell.run": {
-          const cmd = String(args.cmd ?? "");
+          const prepared = await this.revalidateShellCall(args, timeoutMs);
+          const cmd = prepared.cmd as string;
           const denied = this.scope.deniedCommands.find((d) => cmd.includes(d));
           if (denied) return done({ ok: false, error: `命令包含被禁止的片段「${denied}」` });
-          const cwd = args.cwd ? this.checkPath(String(args.cwd)) : undefined;
-          return done(await this.exec([this.shell, this.loginShell ? "-lc" : "-c", cmd], { cwd, timeoutMs: Number(args.timeoutMs ?? timeoutMs), stdin: args.stdin as string | undefined }));
+          return done(await this.exec([this.shell, this.loginShell ? "-lc" : "-c", cmd], {
+            cwd: prepared.cwd as string,
+            timeoutMs: prepared.timeoutMs as number,
+            stdin: prepared.stdin as string | undefined,
+            signal,
+          }));
         }
-        case "applescript.run":
-          return done(await this.exec(["osascript", "-e", String(args.script)], { timeoutMs: Number(args.timeoutMs ?? timeoutMs) }));
+        case "applescript.run": {
+          if (typeof args.script !== "string") throw new Error("AppleScript 脚本格式无效");
+          return done(await this.exec(["osascript", "-e", args.script], { timeoutMs: this.timeoutArgument(args, timeoutMs), signal }));
+        }
         case "jxa.run":
-          return done(await this.exec(["osascript", "-l", "JavaScript", "-e", String(args.script)], { timeoutMs }));
+          if (typeof args.script !== "string") throw new Error("JXA 脚本格式无效");
+          return done(await this.exec(["osascript", "-l", "JavaScript", "-e", args.script], { timeoutMs: this.timeoutArgument(args, timeoutMs), signal }));
         case "shortcuts.run": {
-          const a = ["shortcuts", "run", String(args.name)];
-          return done(await this.exec(a, { timeoutMs, stdin: args.input as string | undefined }));
+          if (typeof args.name !== "string" || (args.input !== undefined && typeof args.input !== "string")) throw new Error("快捷指令参数格式无效");
+          const a = ["shortcuts", "run", args.name];
+          return done(await this.exec(a, { timeoutMs: this.timeoutArgument(args, timeoutMs), stdin: args.input as string | undefined, signal }));
         }
         case "shortcuts.list":
-          return done(await this.exec(["shortcuts", "list"], { timeoutMs }));
+          return done(await this.exec(["shortcuts", "list"], { timeoutMs, signal }));
         case "fs.list": {
-          const p = this.checkPath(String(args.path));
-          const depth = Math.min(Math.max(Number(args.depth ?? 1), 1), 3);
-          return done({ ok: true, output: await this.listDir(p, depth, "") });
+          if (typeof args.path !== "string") throw new Error("路径格式无效");
+          const p = await this.checkPath(args.path);
+          const requestedDepth = args.depth ?? 1;
+          if (typeof requestedDepth !== "number" || !Number.isSafeInteger(requestedDepth)) throw new Error("目录深度格式无效");
+          const depth = Math.min(Math.max(requestedDepth, 1), 3);
+          signal?.throwIfAborted();
+          return done({ ok: true, output: await this.listDir(p, depth, "", signal) });
         }
         case "fs.read": {
-          const p = this.checkPath(String(args.path));
-          const max = Math.min(Number(args.maxBytes ?? 16_384), 256_000);
-          const buf = await readFile(p);
-          const text = buf.subarray(0, max).toString("utf8");
-          return done({ ok: true, output: buf.length > max ? `${text}\n…(截断，共 ${buf.length} 字节)` : text });
+          if (typeof args.path !== "string") throw new Error("路径格式无效");
+          const p = await this.checkPath(args.path);
+          const requestedMax = args.maxBytes ?? 16_384;
+          if (typeof requestedMax !== "number" || !Number.isSafeInteger(requestedMax) || requestedMax < 0) throw new Error("读取大小格式无效");
+          const max = Math.min(requestedMax, 256_000);
+          signal?.throwIfAborted();
+          const file = await open(p, "r");
+          try {
+            const buf = Buffer.alloc(max + 1);
+            const { bytesRead } = await file.read(buf, 0, buf.length, 0);
+            const size = (await file.stat()).size;
+            signal?.throwIfAborted();
+            const text = buf.subarray(0, Math.min(bytesRead, max)).toString("utf8");
+            return done({ ok: true, output: bytesRead > max || size > max ? `${text}\n…(截断，超过 ${max} 字节)` : text });
+          } finally {
+            await file.close();
+          }
         }
         case "screenshot": {
           if (!isMac) return done({ ok: false, error: "此平台没有截图实现" });
           const file = `/tmp/cuaremote-shot-${Date.now()}.jpg`;
-          const r = await this.exec(["screencapture", "-x", "-t", "jpg", file], { timeoutMs: 10_000 });
+          const r = await this.exec(["screencapture", "-x", "-t", "jpg", file], { timeoutMs: 10_000, signal });
           if (!r.ok) return done(r);
+          signal?.throwIfAborted();
           const data = await readFile(file);
           return done({ ok: true, output: `截图 ${data.length} 字节`, attachments: [{ kind: "image/jpeg", inline: data.toString("base64") }] });
         }
@@ -177,17 +226,18 @@ export class LocalBunHost implements Host {
           const serial = args.serial ? ["-s", String(args.serial)] : [];
           const cmd = String(args.cmd ?? "");
           const shellCmd = [adb, ...serial].map(shq).join(" ") + " " + cmd;
-          const to = Number(args.timeoutMs ?? 30_000);
-          if (!args.image) return done(await this.exec(["/bin/sh", "-c", shellCmd], { timeoutMs: to }));
-          const png = await this.execBytes(["/bin/sh", "-c", shellCmd], to);
+          const to = this.timeoutArgument(args, 30_000);
+          if (!args.image) return done(await this.exec(["/bin/sh", "-c", shellCmd], { timeoutMs: to, signal }));
+          const png = await this.execBytes(["/bin/sh", "-c", shellCmd], to, signal);
           if (!png.ok) return done({ ok: false, error: png.error, output: png.text });
           if (png.bytes.length < 8) return done({ ok: false, error: "adb 没回图片数据" });
           if (isMac) {
             const src = `/tmp/cuaremote-adb-${Date.now()}.png`;
             const dst = src.replace(/\.png$/, ".jpg");
             await Bun.write(src, png.bytes);
-            const r = await this.exec(["sips", "-Z", String(Number(args.maxWidth ?? 720)), "-s", "format", "jpeg", "-s", "formatOptions", "70", src, "--out", dst], { timeoutMs: 15_000 });
+            const r = await this.exec(["sips", "-Z", String(Number(args.maxWidth ?? 720)), "-s", "format", "jpeg", "-s", "formatOptions", "70", src, "--out", dst], { timeoutMs: 15_000, signal });
             if (r.ok) {
+              signal?.throwIfAborted();
               const jpg = await readFile(dst);
               return done({ ok: true, output: `截图 ${jpg.length} 字节`, attachments: [{ kind: "image/jpeg", inline: jpg.toString("base64") }] });
             }
@@ -196,7 +246,7 @@ export class LocalBunHost implements Host {
         }
         case "apps.running": {
           if (!isMac) return done({ ok: false, error: "此平台没有实现" });
-          return done(await this.exec(["osascript", "-e", 'tell application "System Events" to get {name, bundle identifier} of every application process whose background only is false'], { timeoutMs: 8_000 }));
+          return done(await this.exec(["osascript", "-e", 'tell application "System Events" to get {name, bundle identifier} of every application process whose background only is false'], { timeoutMs: 8_000, signal }));
         }
         default:
           return done({ ok: false, error: `没有工具 ${tool}` });
@@ -206,26 +256,106 @@ export class LocalBunHost implements Host {
     }
   }
 
-  /** 路径必须落在 allowedDirs 内 */
-  private checkPath(p: string): string {
-    const abs = resolve(p.replace(/^~(?=$|\/)/, homedir()));
-    const ok = this.scope.allowedDirs.some((d) => {
-      const rel = relative(resolve(d.replace(/^~(?=$|\/)/, homedir())), abs);
-      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-    });
-    if (!ok) throw new Error(`路径 ${abs} 不在允许的目录里（${this.scope.allowedDirs.join(", ")}）`);
-    return abs;
+  private expandHome(path: string): string {
+    return path.replace(/^~(?=$|\/)/, homedir());
   }
 
-  private async listDir(dir: string, depth: number, indent: string): Promise<string> {
+  private async canonicalAllowedDirs(): Promise<string[]> {
+    const roots = await Promise.all(this.scope.allowedDirs.map(async (dir) => {
+      const path = await realpath(resolve(this.expandHome(dir)));
+      if (!(await stat(path)).isDirectory()) throw new Error(`允许范围不是目录：${path}`);
+      return path;
+    }));
+    return [...new Set(roots)];
+  }
+
+  private withinAllowedRoot(path: string, roots: string[]): boolean {
+    return roots.some((root) => {
+      const rel = relative(root, path);
+      return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+    });
+  }
+
+  private async canonicalPath(path: string, roots: string[]): Promise<string> {
+    const defaultRoot = roots[0];
+    if (!defaultRoot) throw new Error("没有配置允许的目录");
+    const expanded = this.expandHome(path);
+    const absolute = isAbsolute(expanded) ? resolve(expanded) : resolve(defaultRoot, expanded);
+    const canonical = await realpath(absolute);
+    if (!this.withinAllowedRoot(canonical, roots)) {
+      throw new Error(`路径 ${canonical} 不在允许的目录里（${roots.join(", ")}）`);
+    }
+    return canonical;
+  }
+
+  private async checkPath(path: string): Promise<string> {
+    return this.canonicalPath(path, await this.canonicalAllowedDirs());
+  }
+
+  private async prepareShellArgs(args: Record<string, unknown>, defaultTimeoutMs = 60_000): Promise<Record<string, unknown>> {
+    const accepted = new Set(["cmd", "cwd", "timeoutMs", "stdin"]);
+    const unknown = Object.keys(args).find((key) => !accepted.has(key));
+    if (unknown) throw new Error(`shell.run 不支持参数 ${unknown}`);
+    if (typeof args.cmd !== "string") throw new Error("shell.run 的 cmd 必须是字符串");
+    if (args.cwd !== undefined && typeof args.cwd !== "string") throw new Error("shell.run 的 cwd 必须是字符串");
+    if (args.stdin !== undefined && typeof args.stdin !== "string") throw new Error("shell.run 的 stdin 必须是字符串");
+
+    const timeoutMs = args.timeoutMs === undefined ? defaultTimeoutMs : args.timeoutMs;
+    if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || !Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
+      throw new Error("shell.run 的 timeoutMs 必须是 1 到 120000 之间的正整数");
+    }
+
+    const roots = await this.canonicalAllowedDirs();
+    const requestedCwd = args.cwd === undefined ? roots[0] : args.cwd;
+    if (typeof requestedCwd !== "string") throw new Error("没有配置默认工作目录");
+    const cwd = await this.canonicalPath(requestedCwd, roots);
+    if (!(await stat(cwd)).isDirectory()) throw new Error("shell.run 的 cwd 必须是目录");
+    return {
+      cmd: args.cmd,
+      cwd,
+      timeoutMs,
+      ...(args.stdin === undefined ? {} : { stdin: args.stdin }),
+    };
+  }
+
+  private async revalidateShellCall(args: Record<string, unknown>, callTimeoutMs: number): Promise<Record<string, unknown>> {
+    const approved = this.preparedShellCalls.get(args);
+    if (approved && args.cwd !== approved.cwd) {
+      throw new Error("已审批的工作目录已改变，请重新确认");
+    }
+    if (approved && args.timeoutMs !== approved.timeoutMs) throw new Error("已审批的超时时间已改变，请重新确认");
+    const normalized = await this.prepareShellArgs(args, approved?.timeoutMs ?? callTimeoutMs);
+    if (approved && normalized.cwd !== approved.cwd) throw new Error("已审批的工作目录已改变，请重新确认");
+    if (approved && normalized.timeoutMs !== approved.timeoutMs) throw new Error("已审批的超时时间已改变，请重新确认");
+    return normalized;
+  }
+
+  private timeoutArgument(args: Record<string, unknown>, fallback: number): number {
+    const timeout = args.timeoutMs === undefined ? fallback : args.timeoutMs;
+    if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 120_000) {
+      throw new Error("timeoutMs 必须是 1 到 120000 之间的正整数");
+    }
+    return timeout;
+  }
+
+  private async listDir(dir: string, depth: number, indent: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     const entries = await readdir(dir, { withFileTypes: true });
     const lines: string[] = [];
     for (const e of entries.slice(0, 200)) {
+      signal?.throwIfAborted();
+      const entry = join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        lines.push(`${indent}${e.name} (symlink)`);
+        continue;
+      }
       if (e.isDirectory()) {
+        const canonical = await this.checkPath(entry);
         lines.push(`${indent}${e.name}/`);
-        if (depth > 1) lines.push(await this.listDir(join(dir, e.name), depth - 1, indent + "  "));
+        if (depth > 1) lines.push(await this.listDir(canonical, depth - 1, indent + "  ", signal));
       } else {
-        const s = await stat(join(dir, e.name)).catch(() => null);
+        const canonical = await this.checkPath(entry);
+        const s = await stat(canonical).catch(() => null);
         lines.push(`${indent}${e.name}${s ? `  ${s.size}B` : ""}`);
       }
     }
@@ -234,20 +364,35 @@ export class LocalBunHost implements Host {
   }
 
   /** stdout 按字节拿（图片）；失败时 text 是 stderr */
-  private async execBytes(argv: string[], timeoutMs: number): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string; text: string }> {
-    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", env: { ...process.env, CUAREMOTE: "1" } });
-    const timer = setTimeout(() => proc.kill(), timeoutMs);
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
-    clearTimeout(timer);
-    return code === 0 ? { ok: true, bytes: new Uint8Array(out) } : { ok: false, error: `退出码 ${code}`, text: err.slice(0, 4000) };
+  private async execBytes(argv: string[], timeoutMs: number, signal?: AbortSignal): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string; text: string }> {
+    const result = await runProcess(argv, { timeoutMs, signal, env: { ...process.env, CUAREMOTE: "1" } });
+    const text = result.stderr.toString("utf8").slice(0, 4000);
+    if (result.failure) return { ok: false, error: this.processFailure(result), text };
+    if (result.code !== 0) return { ok: false, error: `退出码 ${result.code}`, text };
+    return { ok: true, bytes: result.stdout };
   }
 
-  private async exec(argv: string[], o: { cwd?: string; timeoutMs: number; stdin?: string }): Promise<Omit<ToolResult, "ms" | "attachments">> {
-    const proc = Bun.spawn(argv, { cwd: o.cwd, stdout: "pipe", stderr: "pipe", stdin: o.stdin !== undefined ? new TextEncoder().encode(o.stdin) : undefined, env: { ...process.env, CUAREMOTE: "1" } });
-    const timer = setTimeout(() => proc.kill(), o.timeoutMs);
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-    clearTimeout(timer);
+  private async exec(argv: string[], o: { cwd?: string; timeoutMs: number; stdin?: string; signal?: AbortSignal }): Promise<Omit<ToolResult, "ms" | "attachments">> {
+    const result = await runProcess(argv, { cwd: o.cwd, timeoutMs: o.timeoutMs, signal: o.signal, input: o.stdin, env: { ...process.env, CUAREMOTE: "1" } });
+    const out = result.stdout.toString("utf8");
+    const err = result.stderr.toString("utf8");
     const output = (out + (err ? (out ? "\n" : "") + err : "")).slice(0, 32_000);
-    return code === 0 ? { ok: true, output } : { ok: false, output, error: `退出码 ${code}` };
+    if (result.failure) return { ok: false, output, error: this.processFailure(result) };
+    if (result.stdinClosedEarly) return { ok: false, output, error: "子进程提前关闭标准输入" };
+    return result.code === 0 ? { ok: true, output } : { ok: false, output, error: `退出码 ${result.code}` };
+  }
+
+  private processFailure(result: ProcessRunResult): string {
+    switch (result.failure) {
+      case "aborted": return "操作已取消，子进程已终止";
+      case "timeout": return "命令超时，子进程已终止";
+      case "output_limit": return `命令输出超过 ${PROCESS_OUTPUT_LIMIT} 字节限制，子进程已终止`;
+      case "drain_timeout": return "子进程退出后输出管道未及时关闭，已停止读取";
+      case "spawn_error": return result.spawnCode ? `无法启动子进程（${result.spawnCode}）` : "无法启动子进程";
+      case "input_limit": return `标准输入超过 ${PROCESS_OUTPUT_LIMIT} 字节限制`;
+      case "invalid_timeout": return "子进程超时时间无效";
+      case "stdin_error": return "无法向子进程写入标准输入";
+      default: return "子进程执行失败";
+    }
   }
 }

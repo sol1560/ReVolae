@@ -38,7 +38,7 @@
 
 | 工具 | 参数 | 静态等级 | 说明 |
 |---|---|---|---|
-| `shell.run` | `{cmd, cwd?, timeoutMs?, stdin?}` | 1（`sudo`/`rm -rf`/`diskutil` 等命中 deniedCommands 升 2） | `/bin/zsh -lc` |
+| `shell.run` | `{cmd, cwd, timeoutMs?, stdin?}` | 1（`sudo`/`rm -rf`/`diskutil` 等命中 deniedCommands 升 2） | `/bin/zsh -lc`；brain 在预检前填入规范化的有效 cwd 和超时（默认 60000ms，最大 120000ms） |
 | `applescript.run` | `{script, timeoutMs?}` | 1 | `osascript -e` |
 | `jxa.run` | `{script}` | 1 | `osascript -l JavaScript` |
 | `shortcuts.run` | `{name, input?}` | 1 | `shortcuts run` |
@@ -51,6 +51,8 @@
 | `android.adb` | `{serial?, cmd, timeoutMs?, image?, maxWidth?}` | 1 | 机器上有 `adb`（PATH 或 `CUAREMOTE_ADB`）时才出现。`cmd` 是 adb 子命令（不含 `adb`），`image=true` 时把 stdout 当 PNG、缩成 JPEG 放附件。模型看不到它，见「Android（adb 路径）」 |
 
 `gui.*` 不在宿主里：brain 自己 spawn `cua-driver mcp` 并做白名单过滤（见 brain 文档）。宿主负责保证 cua-driver 的 TCC 归属（M1 用 `EmbeddedCuaDriverHost` 或让 brain 用 `cua-driver mcp --direct`）。
+
+Mac Brain 的 shell 审批详情绑定完整调用参数，格式为 `shell.run\n` 加缩进 JSON（命令、cwd、timeoutMs，以及存在时的 stdin）；相对 cwd 以首个允许目录为基准。AppleScript/JXA/快捷指令的审批详情同样绑定工具名和完整调用参数。
 
 ## 审批签名
 

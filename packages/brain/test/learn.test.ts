@@ -73,6 +73,12 @@ describe("learnApp（假设备 + mock 模型）", () => {
   test("读取一阶段后取消：不继续采集、不发模型请求、不保存卡片", async () => {
     const ctrl = new AbortController();
     const { host, calls } = fakeHost();
+    const call = host.call.bind(host);
+    let passedSignal: AbortSignal | undefined;
+    host.call = async (name, args, timeoutMs, signal) => {
+      passedSignal = signal;
+      return call(name, args, timeoutMs, signal);
+    };
     const events: LearnEvent[] = [];
     let modelCalls = 0;
     const provider = new MockProvider();
@@ -82,6 +88,7 @@ describe("learnApp（假设备 + mock 模型）", () => {
       if (event.type === "app.learn.progress" && event.found > 0) ctrl.abort();
     } }, { bundleId: "com.apple.Notes", explore: false })).rejects.toThrow();
     expect(calls.map((c) => c.args.phase)).toEqual(["sdef"]);
+    expect(passedSignal).toBe(ctrl.signal);
     expect(modelCalls).toBe(0);
     expect(events.some((e) => e.type === "app.cards")).toBe(false);
   });
@@ -232,17 +239,43 @@ describe("runCard：每张卡都过策略引擎", () => {
   test("平衡档 L1 卡：先确认再执行，工具收到渲染后的脚本", async () => {
     const { d, calls, events, asked } = deps("balanced");
     const c = card({ control: "input_button", fields: [{ key: "body", label: "内容", kind: "text", required: true }], action: { kind: "applescript", template: 'tell application "Notes" to make new note with properties {body:"{{body}}"}' } });
+    const expectedScript = 'tell application "Notes" to make new note with properties {body:"hi \\"there\\""}';
     const out = await runCard(d, c, { body: 'hi "there"' });
     expect(out.ok).toBe(true);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.level).toBe(1);
-    expect(asked[0]!.detail).toContain('{body:"hi \\"there\\""}');
+    expect(asked[0]!.detail).toBe(`applescript.run\n${JSON.stringify({ script: expectedScript }, null, 2)}`);
     expect(types(events)).toEqual(["run.created", "step.started", "step.precheck", "step.approval_required", "step.finished", "run.finished"]);
     expect(calls.filter((x) => x.tool === "applescript.run")).toHaveLength(1);
     expect(calls.find((x) => x.tool === "applescript.run")!.args.script).toBe('tell application "Notes" to make new note with properties {body:"hi \\"there\\""}');
     const created = events[0] as Extract<LearnEvent, { type: "run.created" }>;
     expect(created.deviceId).toBe("mac-1");
     expect(created.plan[0]!.channel).toBe("applescript");
+  });
+
+  test("shell 卡先准备参数，再用包含有效 cwd 的同一参数集审批并执行", async () => {
+    const { d, calls, asked } = deps("balanced");
+    const effectiveArgs = { cmd: "printf card", cwd: "/tmp/workspace", timeoutMs: 60_000 };
+    let preparations = 0;
+    let policyArgs: Record<string, unknown> | undefined;
+    d.host.prepareCall = async (toolName, args) => {
+      preparations++;
+      return toolName === "shell.run" ? { ...args, cwd: effectiveArgs.cwd, timeoutMs: effectiveArgs.timeoutMs } : args;
+    };
+    const decide = d.policy.decide.bind(d.policy);
+    d.policy.decide = async (input) => {
+      if (input.tool.name === "shell.run") policyArgs = input.args;
+      return decide(input);
+    };
+
+    const out = await runCard(d, card({ source: "adapter", action: { kind: "shell", template: "printf card" } }), {});
+    const expectedDetail = `shell.run\n${JSON.stringify(effectiveArgs, null, 2)}`;
+    expect(out.ok).toBe(true);
+    expect(preparations).toBe(1);
+    expect(asked).toEqual([{ level: 1, detail: expectedDetail }]);
+    expect(policyArgs).toEqual(effectiveArgs);
+    expect(calls.filter((call) => call.tool === "shell.run").map((call) => call.args)).toEqual([effectiveArgs]);
+    expect(calls.find((call) => call.tool === "shell.run")!.args).toBe(policyArgs!);
   });
 
   test("用户拒绝：不调用工具，run 失败", async () => {
@@ -272,6 +305,26 @@ describe("runCard：每张卡都过策略引擎", () => {
     expect(cancelled.events.at(-1)).toMatchObject({ ok: false, status: "cancelled", cancelled: true });
   });
 
+  test("卡片审批允许返回时已过期：步骤失败且不调用工具", async () => {
+    const expired = deps("balanced", { request: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      return { allow: true, remember: "once" };
+    } });
+    const out = await runCard({ ...expired.d, limits: { approvalTtlSec: 1 } }, card({}), {});
+    expect(out).toMatchObject({ ok: false, status: "failed" });
+    expect(expired.calls).toHaveLength(0);
+    expect(expired.events.find((event) => event.type === "step.finished")).toMatchObject({ ok: false, error: "确认已过期，未执行" });
+  });
+
+  test("卡片参数准备失败：产生失败结果且不执行", async () => {
+    const { d, calls, events } = deps("handsoff");
+    d.host.prepareCall = async () => { throw new Error("准备参数失败"); };
+    const out = await runCard(d, card({}), {});
+    expect(out).toMatchObject({ ok: false, status: "failed", error: "准备参数失败" });
+    expect(calls).toHaveLength(0);
+    expect(events.find((event) => event.type === "step.finished")).toMatchObject({ ok: false, error: "准备参数失败" });
+  });
+
   test("批准返回前已取消：即使返回allow也不执行，保留指定runId", async () => {
     const ctrl = new AbortController();
     const { d, calls, events } = deps("balanced", { request: async () => {
@@ -294,7 +347,7 @@ describe("runCard：每张卡都过策略引擎", () => {
     const b = deps("handsoff");
     const out = await runCard(b.d, card({ staticLevel: 2 }), {});
     expect(out.ok).toBe(true);
-    expect(b.asked).toEqual([{ level: 2, detail: 'tell application "Notes" to count notes' }]);
+    expect(b.asked).toEqual([{ level: 2, detail: `applescript.run\n${JSON.stringify({ script: 'tell application "Notes" to count notes' }, null, 2)}` }]);
     const pre = b.events.find((e) => e.type === "step.precheck") as Extract<LearnEvent, { type: "step.precheck" }>;
     expect(pre.level).toBe(2);
     expect(pre.verdict).toBe("confirm");
