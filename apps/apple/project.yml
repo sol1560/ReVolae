@@ -1,0 +1,86 @@
+name: ReVolae
+options:
+  bundleIdPrefix: com.revolae
+  deploymentTarget:
+    iOS: '18.0'
+    macOS: '15.0'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: 1
+    CODE_SIGN_STYLE: Automatic
+packages:
+  Core:
+    path: ../../packages/apple
+  Protocol:
+    path: ../../packages/protocol/swift
+  Mac:
+    path: ../../packages/macos
+targets:
+  ReVolaePhone:
+    type: application
+    platform: iOS
+    sources:
+      - ../ios/Sources
+      - Shared
+    dependencies:
+      - package: Core
+        product: CuaRemoteCore
+      - package: Protocol
+        product: CuaRemoteProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.revolae.phone
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: ../ios/ReVolaePhoneSimulator.entitlements
+        TARGETED_DEVICE_FAMILY: '1'
+        INFOPLIST_KEY_CFBundleDisplayName: ReVolae
+        INFOPLIST_KEY_NSCameraUsageDescription: 扫描你自己的 Mac 上显示的配对二维码。
+        INFOPLIST_KEY_NSFaceIDUsageDescription: 批准 Mac 上的操作前验证你的身份。
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: 在开发模式下连接本地 Mac 的 Hub。
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    info:
+      path: ../ios/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+  ReVolaeMac:
+    type: application
+    platform: macOS
+    sources:
+      - ../daemon-macos/Sources
+      - Shared
+    dependencies:
+      - package: Core
+        product: CuaRemoteCore
+      - package: Protocol
+        product: CuaRemoteProtocol
+      - package: Mac
+        product: CuaRemoteMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.revolae.mac
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ReVolae Mac
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: 仅在手机签名批准后，执行你要求的 Mac 应用操作。
+    entitlements:
+      path: ../daemon-macos/ReVolae.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true
+    info:
+      path: ../daemon-macos/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+schemes:
+  ReVolaePhone:
+    build:
+      targets:
+        ReVolaePhone: all
+  ReVolaeMac:
+    build:
+      targets:
+        ReVolaeMac: all

@@ -55,6 +55,7 @@ public struct RelayEnvelope: Sendable, Equatable {
 
     public func encode() throws -> Data {
         let t = Data(to.utf8), f = Data(from.utf8)
+        guard validRelayId(to), validRelayId(from) else { throw ProtocolError.invalidRelayIdentity }
         guard t.count <= 255, f.count <= 255 else { throw ProtocolError.idTooLong }
         var d = Data()
         d.append(RelayEnvelope.version)
@@ -66,26 +67,51 @@ public struct RelayEnvelope: Sendable, Equatable {
     }
 
     public static func decode(_ data: Data) throws -> RelayEnvelope {
+        try decodeWithHeader(data).envelope
+    }
+
+    public static func decodeWithHeader(_ data: Data) throws -> (envelope: RelayEnvelope, header: Data) {
+        guard data.count >= 5 else { throw ProtocolError.frameTooShort }
         var i = data.startIndex
         func next() throws -> UInt8 { guard i < data.endIndex else { throw ProtocolError.frameTooShort }; defer { i += 1 }; return data[i] }
         guard try next() == version else { throw ProtocolError.badRelayVersion }
         let tl = Int(try next()); guard data.distance(from: i, to: data.endIndex) >= tl else { throw ProtocolError.frameTooShort }
-        let to = String(decoding: data[i..<i+tl], as: UTF8.self); i += tl
-        let fl = Int(try next()); guard data.distance(from: i, to: data.endIndex) >= fl else { throw ProtocolError.frameTooShort }
-        let from = String(decoding: data[i..<i+fl], as: UTF8.self); i += fl
+        guard let to = String(data: data[i..<i+tl], encoding: .utf8) else { throw ProtocolError.badRelayUTF8 }
+        i += tl
+        let fl = Int(try next()); guard data.distance(from: i, to: data.endIndex) >= fl + 1 else { throw ProtocolError.frameTooShort }
+        guard let from = String(data: data[i..<i+fl], encoding: .utf8) else { throw ProtocolError.badRelayUTF8 }
+        i += fl
         let flags = try next()
-        return RelayEnvelope(to: to, from: from, encrypted: flags & 1 == 1, body: Data(data[i...]))
+        guard flags & ~1 == 0 else { throw ProtocolError.unsupportedRelayFlags(flags) }
+        let body = Data(data.suffix(from: i))
+        let envelope = RelayEnvelope(to: to, from: from, encrypted: flags & 1 == 1, body: body)
+        guard validRelayId(to), validRelayId(from) else {
+            throw ProtocolError.invalidRelayIdentity
+        }
+        let header = Data(data.prefix(through: data.index(before: i)))
+        guard try RelayEnvelope(to: to, from: from, encrypted: envelope.encrypted, body: Data()).encode() == header else {
+            throw ProtocolError.noncanonicalRelayHeader
+        }
+        return (envelope, header)
     }
 }
 
 public enum ProtocolError: Error, Equatable {
-    case frameTooShort, badKind(UInt8), notControl, idTooLong, badRelayVersion, badMediaFlags(UInt8), badMediaSize
+    case frameTooShort, badKind(UInt8), notControl, idTooLong, badRelayVersion, invalidRelayIdentity, badRelayUTF8, unsupportedRelayFlags(UInt8), noncanonicalRelayHeader, badMediaFlags(UInt8), badMediaSize
+}
+
+private func validRelayId(_ id: String) -> Bool {
+    !id.isEmpty && !id.contains("\r") && !id.contains("\n")
 }
 
 /// 与 approvalChallenge() 一致
 public func approvalChallenge(runId: String, stepId: String, actionDetail: String, nonce: String, expiresAt: Int) -> String {
     let digest = SHA256.hash(data: Data(actionDetail.utf8)).map { String(format: "%02x", $0) }.joined()
     return ["cuaremote-approval-v1", runId, stepId, digest, nonce, String(expiresAt)].joined(separator: "\n")
+}
+
+public func shellApprovalDetail(command: String, cwd: String) -> String {
+    "shell.run\ncwd[\(cwd.utf8.count)]:\(cwd)\n\(command)"
 }
 
 public func approvalSignedPayload(_ challenge: String, allow: Bool) -> String {

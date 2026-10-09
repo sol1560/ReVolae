@@ -1,0 +1,7 @@
+{
+  "command": "printf fixture",
+  "cwd": "/tmp/工作\n区",
+  "detail": "shell.run\ncwd[15]:/tmp/工作\n区\nprintf fixture",
+  "changedCwd": "/tmp/工作/区",
+  "changedCwdDetail": "shell.run\ncwd[15]:/tmp/工作/区\nprintf fixture"
+}

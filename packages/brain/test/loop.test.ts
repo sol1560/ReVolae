@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { AnyMessage, mkMsg, type MsgBody } from "@cuaremote/protocol";
-import { runIntent, type ApprovalGate, type BrainEvent } from "../src/agent/loop.js";
+import { join, resolve } from "node:path";
+import { AnyMessage, mkMsg, shellApprovalDetail, type MsgBody } from "@cuaremote/protocol";
+import { runIntent, type ApprovalGate, type ApprovalRequest, type BrainEvent } from "../src/agent/loop.js";
 import { LocalBunHost } from "../src/host/local-bun-host.js";
 import { PolicyEngine } from "../src/jev/policy.js";
 import { MockProvider } from "../src/llm/mock.js";
@@ -21,6 +21,30 @@ function setup(autonomy: "cautious" | "balanced" | "handsoff", gate?: ApprovalGa
 const types = (events: BrainEvent[]) => events.map((e) => e.type);
 
 describe("agent loop（mock 模型 + 本地宿主）", () => {
+  test("取消等待审批的任务后，即使批准也不能调用工具", async () => {
+    const ctrl = new AbortController();
+    const { deps } = setup("balanced", { request: async () => {
+      ctrl.abort();
+      return { allow: true, remember: "once" };
+    } });
+    let calls = 0;
+    deps.host.call = async () => { calls++; throw new Error("不应执行"); };
+    const out = await runIntent({ ...deps, signal: ctrl.signal }, { deviceId: "d", intent: "shell: echo cancelled", mode: "agent" });
+    expect(calls).toBe(0);
+    expect(out.ok).toBe(false);
+    expect(out.cancelled).toBe(true);
+  });
+
+  test("原生模式拒绝后结束任务，不能由模型把失败改写为成功", async () => {
+    const { deps } = setup("balanced", { request: async () => ({ allow: false, remember: "once" }) });
+    let calls = 0;
+    deps.host.call = async () => { calls++; throw new Error("不应执行"); };
+    const out = await runIntent({ ...deps, stopOnFailure: true }, { deviceId: "d", intent: "shell: echo denied", mode: "agent" });
+    expect(calls).toBe(0);
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain("拒绝");
+  });
+
   test("放手档：一步 shell 直接执行并回传输出", async () => {
     const { deps, events } = setup("handsoff");
     const out = await runIntent(deps, { deviceId: "d", intent: "shell: echo hello-loop", mode: "agent" });
@@ -47,6 +71,77 @@ describe("agent loop（mock 模型 + 本地宿主）", () => {
     expect(req.challenge.split("\n")[0]).toBe("cuaremote-approval-v1");
     expect(req.expiresAt).toBeGreaterThan(Date.now() / 1000);
     expect(req.action.summary).toContain("echo need-ok");
+  });
+
+  test("shell cwd 默认和相对路径在审批与工具调用前规范化", async () => {
+    const command = "echo cwd-bound";
+    const runShell = async (modelCwd?: string | null) => {
+      const requests: ApprovalRequest[] = [];
+      const { deps } = setup("balanced", {
+        request: async (request) => {
+          requests.push(request);
+          return { allow: true, remember: "once" };
+        },
+      });
+      const root = deps.host.scope.allowedDirs[0]!;
+      const listed = await deps.host.listTools();
+      const tools = listed.tools.map((tool) => tool.name === "shell.run"
+        ? {
+            ...tool,
+            inputSchema: {
+              ...tool.inputSchema,
+              properties: {
+                ...(tool.inputSchema.properties as Record<string, unknown>),
+                cwd: { type: "string", default: root },
+              },
+            },
+          }
+        : tool);
+      deps.host.listTools = async () => ({ tools, scope: listed.scope });
+
+      const policyArgs: Record<string, unknown>[] = [];
+      const decide = deps.policy.decide.bind(deps.policy);
+      deps.policy.decide = async (request) => {
+        if (request.tool.name === "shell.run") policyArgs.push(request.args);
+        return decide(request);
+      };
+      const calls: { tool: string; args: Record<string, unknown> }[] = [];
+      deps.host.call = async (tool, args) => {
+        calls.push({ tool, args });
+        return { ok: true, output: "done", attachments: [], ms: 1 };
+      };
+
+      const provider = deps.provider;
+      const chat = provider.chat.bind(provider);
+      provider.chat = async (request) => {
+        const response = await chat(request);
+        const shellCall = response.toolCalls.find((toolCall) => toolCall.name === "shell.run");
+        if (shellCall && modelCwd !== undefined) shellCall.args.cwd = modelCwd;
+        return response;
+      };
+      await runIntent(deps, { deviceId: "phone", intent: `shell: ${command}`, mode: "agent" });
+      return { root, requests, policyArgs, calls };
+    };
+
+    const omitted = await runShell();
+    const defaultAction = shellApprovalDetail(command, omitted.root);
+    expect(omitted.requests[0]?.action.detail).toBe(defaultAction);
+    expect(omitted.requests[0]?.action.targetPath).toBe(omitted.root);
+    expect(omitted.calls[0]).toEqual({ tool: "shell.run", args: { cmd: command, cwd: omitted.root } });
+    expect(omitted.policyArgs[0]).toBe(omitted.calls[0]?.args);
+
+    const relative = await runShell("nested/../inside");
+    const resolvedCwd = resolve(relative.root, "nested/../inside");
+    const relativeAction = shellApprovalDetail(command, resolvedCwd);
+    expect(relative.requests[0]?.action.detail).toBe(relativeAction);
+    expect(relative.requests[0]?.action.targetPath).toBe(resolvedCwd);
+    expect(relative.calls[0]).toEqual({ tool: "shell.run", args: { cmd: command, cwd: resolvedCwd } });
+    expect(relative.policyArgs[0]).toBe(relative.calls[0]?.args);
+    expect(relativeAction).not.toBe(defaultAction);
+
+    const invalid = await runShell(null);
+    expect(invalid.requests[0]?.action.detail).toBe(command);
+    expect(invalid.calls[0]?.args.cwd).toBeNull();
   });
 
   test("用户拒绝：这一步失败，模型收到拒绝提示后结束，run 不算成功执行", async () => {

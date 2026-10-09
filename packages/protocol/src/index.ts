@@ -7,3 +7,4 @@ export * from "./approval.js";
 export * from "./pairing.js";
 export * from "./sync.js";
 export * from "./media.js";
+export * from "./fresh-link.js";

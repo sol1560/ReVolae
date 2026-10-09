@@ -29,7 +29,7 @@ const camel = (s: string) => {
   const p = pascal(s);
   return p.charAt(0).toLowerCase() + p.slice(1);
 };
-const swiftReserved = new Set(["type", "default", "operator", "protocol", "class", "struct", "enum", "func", "var", "let", "in", "for", "is", "as", "self", "Self", "true", "false", "nil", "import", "return", "case", "switch"]);
+const swiftReserved = new Set(["associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import", "init", "inout", "internal", "let", "open", "operator", "private", "precedencegroup", "protocol", "public", "rethrows", "static", "struct", "subscript", "typealias", "var", "break", "case", "catch", "continue", "default", "defer", "do", "else", "fallthrough", "for", "guard", "if", "in", "repeat", "return", "throw", "switch", "where", "while", "as", "Any", "false", "is", "nil", "self", "Self", "super", "throws", "true", "try", "type"]);
 const ident = (s: string) => (swiftReserved.has(s) ? `\`${s}\`` : s);
 
 function swiftType(schema: any, hint: string): { type: string; optional: boolean } {

@@ -21,7 +21,15 @@ export const FRAME_HEADER_BYTES = 5;
 export const MAX_STREAM_ID = 0xffff_ffff;
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
+const dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+function relayIdBytes(id: string): Uint8Array {
+  if (!id || /[\r\n]/.test(id)) throw new RangeError("invalid device id");
+  const bytes = enc.encode(id);
+  if (bytes.byteLength > 255) throw new RangeError("device id too long");
+  if (dec.decode(bytes) !== id) throw new RangeError("invalid device id");
+  return bytes;
+}
 
 export function encodeFrame(f: Frame): Uint8Array {
   if (!Number.isInteger(f.streamId) || f.streamId < 0 || f.streamId > MAX_STREAM_ID) {
@@ -62,9 +70,8 @@ export interface RelayEnvelope {
 export const RELAY_VERSION = 1;
 
 export function encodeRelay(e: RelayEnvelope): Uint8Array {
-  const to = enc.encode(e.to);
-  const from = enc.encode(e.from);
-  if (to.byteLength > 255 || from.byteLength > 255) throw new RangeError("device id too long");
+  const to = relayIdBytes(e.to);
+  const from = relayIdBytes(e.from);
   const out = new Uint8Array(1 + 1 + to.byteLength + 1 + from.byteLength + 1 + e.body.byteLength);
   let o = 0;
   out[o++] = RELAY_VERSION;
@@ -80,18 +87,27 @@ export function encodeRelay(e: RelayEnvelope): Uint8Array {
 }
 
 export function decodeRelay(buf: Uint8Array): RelayEnvelope {
-  if (buf.byteLength < 4) throw new RangeError("relay too short");
+  if (buf.byteLength < 5) throw new RangeError("relay too short");
   let o = 0;
   const v = buf[o++]!;
   if (v !== RELAY_VERSION) throw new RangeError(`bad relay version ${v}`);
   const toLen = buf[o++]!;
+  if (buf.byteLength - o < toLen + 1) throw new RangeError("relay too short");
   const to = dec.decode(buf.subarray(o, o + toLen));
   o += toLen;
   const fromLen = buf[o++]!;
+  if (buf.byteLength - o < fromLen + 1) throw new RangeError("relay too short");
   const from = dec.decode(buf.subarray(o, o + fromLen));
   o += fromLen;
   const flags = buf[o++]!;
-  return { to, from, encrypted: (flags & 1) === 1, body: buf.subarray(o) };
+  if (flags & ~1) throw new RangeError(`unsupported relay flags ${flags}`);
+  const body = buf.subarray(o);
+  const envelope = { to, from, encrypted: (flags & 1) === 1, body };
+  const canonicalHeader = encodeRelay({ ...envelope, body: new Uint8Array(0) });
+  if (canonicalHeader.byteLength !== o || canonicalHeader.some((byte, i) => byte !== buf[i])) {
+    throw new RangeError("noncanonical relay header");
+  }
+  return envelope;
 }
 
 /**
@@ -106,6 +122,10 @@ export function approvalChallenge(p: {
   expiresAt: number;
 }): string {
   return ["cuaremote-approval-v1", p.runId, p.stepId, sha256Hex(p.actionDetail), p.nonce, String(p.expiresAt)].join("\n");
+}
+
+export function shellApprovalDetail(command: string, cwd: string): string {
+  return `shell.run\ncwd[${enc.encode(cwd).byteLength}]:${cwd}\n${command}`;
 }
 
 /**

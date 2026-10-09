@@ -15,7 +15,7 @@ import { JsonlLog } from "./log.js";
  * `brain --mode host`：被 Swift/Kotlin daemon 或 hub spawn。
  * 手机消息从 stdin 进来，事件从 stdout 出去，工具经宿主执行。
  */
-export async function runHostMode(opts: { defaultProvider: string; logPath?: string; cuaArgv?: string[] }) {
+export async function runHostMode(opts: { defaultProvider: string; logPath?: string; cuaArgv?: string[]; native?: boolean }) {
   const stdio = new StdioHost();
   // 宿主如果是 iPad app（提供 ipad.screen / ipad.hid.macro），外面包一层绝对坐标工具；
   // 宿主有 android.adb（Mac 上装了 adb）就再包一层 android.* 工具。两层对不相干的宿主都透明。
@@ -25,7 +25,7 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
   const jev = new JevClient();
   const log = opts.logPath ? new JsonlLog(opts.logPath) : undefined;
   const gui = new CuaDriver({ argv: opts.cuaArgv });
-  const guiUp = await gui.start();
+  const guiUp = opts.native ? false : await gui.start();
   process.stderr.write(`brain: host 模式就绪，provider=${opts.defaultProvider} jev=${jev.enabled ? "on" : "off"} cua-driver=${guiUp ? "on" : "off"}\n`);
 
   const runs = new Map<string, AbortController>();
@@ -43,8 +43,13 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
   };
 
   stdio.onMessage(async (m) => {
+    if (opts.native && !["intent.submit", "run.cancel", "approval.decision", "tools.list.result"].includes(m.type)) return;
     switch (m.type) {
       case "intent.submit": {
+        if (opts.native && (runs.size > 0 || m.mode !== "agent")) {
+          stdio.send({ type: "error", code: "native_busy_or_mode", message: "原生宿主只允许一个 agent 任务", ref: m.id });
+          return;
+        }
         const settings = stdio.privacy;
         let provider;
         try {
@@ -56,10 +61,10 @@ export async function runHostMode(opts: { defaultProvider: string; logPath?: str
         const ctrl = new AbortController();
         const runId = crypto.randomUUID();
         runs.set(runId, ctrl);
-        const policy = new PolicyEngine({ jev, jevEnabled: settings?.jevEnabled ?? jev.enabled, autonomy: settings?.autonomy ?? "balanced" });
+        const policy = new PolicyEngine({ jev, jevEnabled: opts.native ? false : settings?.jevEnabled ?? jev.enabled, autonomy: opts.native ? "cautious" : settings?.autonomy ?? "balanced" });
         try {
           await runIntent(
-            { host: await agentHost(), provider, policy, approvals, gui: guiUp ? gui : undefined, jev, emit: (e) => stdio.send(e), log: (r) => log?.write(r), signal: ctrl.signal, platform: process.platform },
+            { host: await agentHost(), provider, policy, approvals, gui: guiUp ? gui : undefined, jev: opts.native ? undefined : jev, stopOnFailure: opts.native, emit: (e) => stdio.send(e), log: (r) => log?.write(r), signal: ctrl.signal, platform: process.platform },
             { runId, deviceId: m.deviceId, intent: m.text, mode: m.mode, terminalSessionId: m.terminalSessionId },
           );
         } finally {

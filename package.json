@@ -7,7 +7,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "bun run --filter '*' typecheck",
-    "gen": "bun run --filter @cuaremote/protocol gen:schema && bun run --filter @cuaremote/protocol gen:swift"
+    "gen": "bun run --filter @cuaremote/protocol gen:schema && bun run --filter @cuaremote/protocol gen:swift && bun run --filter @cuaremote/protocol gen:fixtures"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

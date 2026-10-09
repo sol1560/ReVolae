@@ -7,6 +7,7 @@ let package = Package(
     products: [.library(name: "CuaRemoteProtocol", targets: ["CuaRemoteProtocol"])],
     targets: [
         .target(name: "CuaRemoteProtocol", path: "Sources/CuaRemoteProtocol"),
+        .executableTarget(name: "FreshLinkInteropFixture", dependencies: ["CuaRemoteProtocol"], path: "Sources/FreshLinkInteropFixture"),
         .testTarget(name: "CuaRemoteProtocolTests", dependencies: ["CuaRemoteProtocol"], path: "Tests/CuaRemoteProtocolTests", resources: [.copy("fixtures")]),
     ]
 )

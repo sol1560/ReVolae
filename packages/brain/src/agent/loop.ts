@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { approvalChallenge, type Channel, type ConcreteAction, type Cost, type DeviceToPhone, type Level, type MsgBody, type PlanStep, type ToolDescriptor } from "@cuaremote/protocol";
+import { isAbsolute, resolve } from "node:path";
+import { approvalChallenge, shellApprovalDetail, type Channel, type ConcreteAction, type Cost, type DeviceToPhone, type Level, type MsgBody, type PlanStep, type ToolDescriptor } from "@cuaremote/protocol";
 import { CuaDriver } from "../gui/cua-driver.js";
 import { jevAxDecide, toCuaCall } from "../gui/jev-ax.js";
 import type { Host, ToolResult } from "../host/types.js";
@@ -36,6 +37,7 @@ export interface AgentDeps {
   limits?: { maxSteps?: number; maxUsd?: number; approvalTtlSec?: number };
   platform?: string;
   signal?: AbortSignal;
+  stopOnFailure?: boolean;
 }
 
 export interface RunInput {
@@ -119,7 +121,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
   const recent: string[] = [];
   const plan: PlanStep[] = [];
   let stepCount = 0;
-  let cancelled = false;
+  let cancelled = deps.signal?.aborted ?? false;
   deps.signal?.addEventListener("abort", () => (cancelled = true));
 
   const { tools: hostTools, scope } = await deps.host.listTools();
@@ -218,15 +220,16 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: `没有工具 ${call.name}` }] });
       continue;
     }
-    const step = plan[planCursor] && plan[planCursor]!.status === "pending" ? plan[planCursor]! : appendStep(plan, tool.channel, describe(tool, call.args).summary);
+    const args = normalizeToolArgs(tool, call.args);
+    const step = plan[planCursor] && plan[planCursor]!.status === "pending" ? plan[planCursor]! : appendStep(plan, tool.channel, describe(tool, args).summary);
     const stepIdx = plan.indexOf(step);
     step.status = "running";
     stepCount++;
     const t0 = Date.now();
-    const action = describe(tool, call.args);
+    const action = describe(tool, args);
     deps.emit({ type: "step.started", runId, stepId: step.id, title: step.title, channel: tool.channel });
 
-    const decision = await deps.policy.decide({ intent: input.intent, tool, args: call.args, action, scope, recent });
+    const decision = await deps.policy.decide({ intent: input.intent, tool, args, action, scope, recent });
     cost.jevTokens += decision.jevTokens;
     cost.usd += decision.jevUsd;
     deps.emit({ type: "step.precheck", runId, stepId: step.id, staticLevel: decision.staticLevel, level: decision.level, intentMatch: decision.intentMatch, risk: decision.risk, confidence: decision.confidence, jevMs: decision.jevMs, verdict: decision.verdict, source: decision.source });
@@ -240,6 +243,12 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       const challenge = approvalChallenge({ runId, stepId: step.id, actionDetail: action.detail, nonce, expiresAt });
       deps.emit({ type: "step.approval_required", runId, stepId: step.id, level: decision.level, action, reason: decision.reason, expiresAt, challenge });
       const a = await deps.approvals.request({ runId, stepId: step.id, level: decision.level, action, reason: decision.reason, challenge, expiresAt });
+      if (cancelled || deps.signal?.aborted) return finish(false, "任务已取消；未执行待批准的操作");
+      if (Math.floor(Date.now() / 1000) >= expiresAt) {
+        step.status = "failed";
+        deps.emit({ type: "step.finished", runId, stepId: step.id, ok: false, ms: Date.now() - t0, channel: tool.channel, dataLeftDevice: false, error: "审批已过期；未执行操作" });
+        return finish(false, "审批已过期；未执行操作");
+      }
       if (a.allow && a.remember === "always" && decision.level < 2) deps.policy.remember(action);
       verdict = a.allow ? "allow" : "deny";
       if (!a.allow) {
@@ -248,6 +257,7 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
         messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: "用户拒绝了这个操作。请换一种不需要这个操作的办法，或者停止并说明。" }] });
         recent.push(`拒绝: ${action.summary}`);
         planCursor = stepIdx + 1;
+        if (deps.stopOnFailure) return finish(false, "用户拒绝了操作");
         continue;
       }
     }
@@ -257,19 +267,22 @@ export async function runIntent(deps: AgentDeps, input: RunInput): Promise<RunOu
       messages.push({ role: "tool", toolCallId: call.id, content: [{ type: "text", text: `系统策略拒绝：${decision.reason}` }] });
       recent.push(`策略拒绝: ${action.summary}`);
       planCursor = stepIdx + 1;
+      if (deps.stopOnFailure) return finish(false, decision.reason);
       continue;
     }
 
     // 执行
+    if (cancelled || deps.signal?.aborted) return finish(false, "任务已取消；未执行操作");
     let result: ToolResult;
-    if (tool.name === "gui.act") result = await guiAct(deps, input.intent, call.args, recent, cost);
-    else if (tool.name.startsWith("gui.") && deps.gui) result = await deps.gui.call(tool.name, call.args);
-    else result = await deps.host.call(tool.name, call.args);
+    if (tool.name === "gui.act") result = await guiAct(deps, input.intent, args, recent, cost);
+    else if (tool.name.startsWith("gui.") && deps.gui) result = await deps.gui.call(tool.name, args);
+    else result = await deps.host.call(tool.name, args);
 
     step.status = result.ok ? "done" : "failed";
     const dataLeft = tool.dataLeavesDevice && deps.provider.info.tier !== "local";
     deps.emit({ type: "step.finished", runId, stepId: step.id, ok: result.ok, ms: Date.now() - t0, channel: tool.channel, cost: { ...cost }, dataLeftDevice: dataLeft, output: result.output?.slice(0, 4000), error: result.error });
     deps.log?.({ t: "step.finished", runId, stepId: step.id, tool: tool.name, ok: result.ok, ms: Date.now() - t0, output: result.output?.slice(0, 2000), error: result.error });
+    if (!result.ok && deps.stopOnFailure) return finish(false, result.error ?? "工具执行失败；未自动重试");
     recent.push(`${result.ok ? "成功" : "失败"}: ${action.summary}`);
     planCursor = stepIdx + 1;
 
@@ -320,6 +333,19 @@ function spec(t: ToolDescriptor): ToolSpec {
   return { name: t.name, description: `${t.description}（等级 L${t.staticLevel}${t.costClass === 2 ? "，很贵" : ""}）`, inputSchema: t.inputSchema };
 }
 
+function normalizeToolArgs(tool: ToolDescriptor, args: Record<string, unknown>): Record<string, unknown> {
+  if (tool.name !== "shell.run") return args;
+  const properties = tool.inputSchema.properties;
+  if (properties === null || typeof properties !== "object" || Array.isArray(properties)) return args;
+  const cwdSchema = (properties as Record<string, unknown>).cwd;
+  if (cwdSchema === null || typeof cwdSchema !== "object" || Array.isArray(cwdSchema)) return args;
+  const defaultCwd = (cwdSchema as Record<string, unknown>).default;
+  if (typeof defaultCwd !== "string" || !isAbsolute(defaultCwd)) return args;
+  if (args.cwd === undefined) return { ...args, cwd: defaultCwd };
+  if (typeof args.cwd === "string") return { ...args, cwd: resolve(defaultCwd, args.cwd) };
+  return args;
+}
+
 function asChannel(c: unknown): Channel {
   const ok = ["shell", "applescript", "jxa", "shortcuts", "fs", "gui", "app", "ipad", "android", "terminal"];
   return (ok.includes(String(c)) ? String(c) : "shell") as Channel;
@@ -335,8 +361,13 @@ function appendStep(plan: PlanStep[], channel: Channel, title: string): PlanStep
 export function describe(tool: ToolDescriptor, args: Record<string, unknown>): ConcreteAction {
   const s = (v: unknown) => (v === undefined ? "" : String(v));
   switch (tool.name) {
-    case "shell.run":
-      return { channel: "shell", summary: `运行命令 ${s(args.cmd).slice(0, 60)}`, detail: s(args.cmd), targetPath: args.cwd ? s(args.cwd) : undefined };
+    case "shell.run": {
+      const command = s(args.cmd);
+      if (typeof args.cwd === "string") {
+        return { channel: "shell", summary: `运行命令 ${command.slice(0, 60)}`, detail: shellApprovalDetail(command, args.cwd), targetPath: args.cwd };
+      }
+      return { channel: "shell", summary: `运行命令 ${command.slice(0, 60)}`, detail: command };
+    }
     case "applescript.run":
     case "jxa.run":
       return { channel: tool.channel, summary: `运行脚本（${tool.name === "jxa.run" ? "JXA" : "AppleScript"}）`, detail: s(args.script), targetApp: /tell application "([^"]+)"/.exec(s(args.script))?.[1] };

@@ -45,5 +45,10 @@
         "nonce": "n0"
       }
     }
-  ]
+  ],
+  "hubAuth": {
+    "payload": "cuaremote-hub-auth-v1\nswift-fixture\ntest-nonce",
+    "publicKey": "048ca057f12d6d664190468e512e51b9f9b4041f75529a376540855b140b6d615a53cd820a42e69a4cb60c7d8b80239486bdf4df7298f995d4b30fff2b2e1f2728",
+    "signature": "HjmPPw4D2AOngOSTPvhu3N58D/zzH/lGl1W3slGWqWRgqQ1yZHsqTKNEKFcttbe6P5QG2LnFASHM8AaWiOUHnQ=="
+  }
 }

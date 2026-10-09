@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   AllMessages,
   AnyMessage,
@@ -12,6 +13,7 @@ import {
   encodeFrame,
   encodeRelay,
   parseControl,
+  shellApprovalDetail,
 } from "../src/index.js";
 
 const samples: Record<string, unknown> = {
@@ -104,5 +106,20 @@ describe("approval challenge", () => {
     expect(a).toBe(approvalChallenge({ runId: "r", stepId: "s", actionDetail: "rm a", nonce: "n", expiresAt: 10 }));
     expect(approvalSignedPayload(a, true).endsWith("\nallow")).toBe(true);
     expect(approvalSignedPayload(a, false).endsWith("\ndeny")).toBe(true);
+  });
+
+  test("shell detail uses fixed UTF-8 cwd length and changes when cwd changes", () => {
+    const fixture = JSON.parse(readFileSync(new URL("../fixtures/shell-approval.json", import.meta.url), "utf8")) as {
+      command: string;
+      cwd: string;
+      detail: string;
+      changedCwd: string;
+      changedCwdDetail: string;
+    };
+    expect(shellApprovalDetail(fixture.command, fixture.cwd)).toBe(fixture.detail);
+    expect(shellApprovalDetail(fixture.command, fixture.changedCwd)).toBe(fixture.changedCwdDetail);
+    expect(fixture.changedCwdDetail).not.toBe(fixture.detail);
+    expect(approvalChallenge({ runId: "r", stepId: "s", actionDetail: fixture.changedCwdDetail, nonce: "n", expiresAt: 10 }))
+      .not.toBe(approvalChallenge({ runId: "r", stepId: "s", actionDetail: fixture.detail, nonce: "n", expiresAt: 10 }));
   });
 });
